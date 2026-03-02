@@ -41,7 +41,7 @@
         public function modifyMemberLevel($AccountId, $MemberLevel)
         {
             $MemberLevel= intval($MemberLevel);
-            $member     = $this->connetion->execute("select * from accounts where account_id = ?", [$AccountId]);
+            $member     = $this->connection->execute("select * from accounts where account_id = ?", [$AccountId]);
             if ($member->RecordCount()=='0') {
                 throw new Exception("會員不存在", 1);
             }
