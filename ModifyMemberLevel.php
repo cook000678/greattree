@@ -17,10 +17,9 @@ class ModifyMemberLevel extends ApiTemplate
             throw new Exception('account_id參數異常只限英文和數字共10碼', 3);
         }
 
-        if (empty($level) || !is_numeric($level)) {
-            throw new Exception('level參數異常只限數字', 4);
+        if (filter_var($level, FILTER_VALIDATE_INT) === false || intval($level) <= 0) {
+            throw new Exception('level參數異常僅限大於0的正整數', 4);
         }
-
 
 
         // 1. 檢查會員是否存在與修改等級
