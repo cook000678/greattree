@@ -2,7 +2,8 @@
 // 模擬 API 呼叫測試
 require_once 'autoload.php';
 require_once 'StampPointMapping.php';
-require_once 'ModifyMemberLevel.php';
+require_once 'MemberCardHistory.php';
+// require_once 'ModifyMemberLevel.php';
 
 class TestStampPointMapping extends StampPointMapping
 {
@@ -19,7 +20,20 @@ class TestStampPointMapping extends StampPointMapping
     }
 }
 
-class TestModifyMemberLevel extends ModifyMemberLevel
+/* class TestModifyMemberLevel extends ModifyMemberLevel {
+ public function testRun($mockInput)
+ {
+ $this->input = $mockInput;
+ try {
+ $this->execute();
+ }
+ catch (\Throwable $th) {
+ $this->setResponse(sprintf("%04d", $th->getCode()), $th->getMessage());
+ }
+ return $this->response;
+ } } */
+
+class TestMemberCardHistory extends MemberCardHistory
 {
     public function testRun($mockInput)
     {
@@ -44,33 +58,25 @@ $mockInput = [
     ]
 ];
 
-/**
- * 測試案例：
- * 商品1 (價格 10) 購買 12個 = 120元
- * 商品2 (價格 20) 購買 5個 = 100元
- * 商品3 (價格 30) 購買 3個 = 90元
- * 總額 310元
- * 
- * 資料庫中的活動：
- * 1. 全館活動 (ID=1)：門檻 100 贈 2 點。
- *    計算：310 / 100 = 3 (倍), 3 * 2 = 6 點。
- * 2. ABC活動 (ID=2)：指定商品 1, 2, 3。門檻 200 贈 1 點。
- *    計算：符合金額 310。 310 / 200 = 1 (倍), 1 * 1 = 1 點。
- * 3. 加碼全館活(ID=3)：門檻 50 贈 5 點。
- *    計算：符合金額 310。 310 / 50 = 6 (倍), 6 * 5 = 30 點。
- */
-
-
 $api = new TestStampPointMapping();
-$res = $api->testRun($mockInput);
+// $res = $api->testRun($mockInput);
 
 $memberData = [
-    'account_id' => '1234256',
-    'level' => 2
+    'account_id' => '123422156',
+    'level' => 3
 ];
 
-$apiModifyLevel = new TestModifyMemberLevel();
+// $apiModifyLevel = new TestModifyMemberLevel();
 // $res = $apiModifyLevel->testRun($memberData);
+
+$historyData = [
+    'account_id' => '123422156',
+    'card_id' => 'ABCDEFG',
+    'point_type' => 'BONUS'
+];
+
+$apiHistory = new TestMemberCardHistory();
+$res = $apiHistory->testRun($historyData);
 
 echo "--- 測試結果 (Mock Response) ---\n<br>";
 echo json_encode($res, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . "\n";
