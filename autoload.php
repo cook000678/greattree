@@ -1,4 +1,5 @@
 <?php
+error_reporting(E_ALL & ~E_DEPRECATED & ~E_STRICT);
 
 require_once( __DIR__ . '/core/adodb/adodb.inc.php');
 spl_autoload_register(function ($class) {

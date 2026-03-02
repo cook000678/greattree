@@ -10,7 +10,7 @@ class StampPointMapping extends ApiTemplate
 
         $input = $this->input;
         $cardId = $input['card_id'] ?? '';
-        $orderNo = $input['order_no'] ?? '';
+        $orderId = $input['order_no'] ?? '';
         $products = $input['products'] ?? [];
 
         // 參數驗證
@@ -22,7 +22,19 @@ class StampPointMapping extends ApiTemplate
             throw new Exception('串接異常，不為json格式', 9);
         }
 
-        // 讀取商品價格
+        // 1. 檢查卡號是否存在
+        $cardModel = new Card($DB);
+        if (!$cardModel->queryCard($cardId)) {
+            throw new Exception("卡號不存在", 1);
+        }
+
+        // 2. 檢查訂單編號是否存在
+        $checkOrder = $Conn->execute("SELECT count(*) as count FROM orders WHERE order_id = ?", [$orderId]);
+        if (!$checkOrder || $checkOrder->fetchObj()->count == 0) {
+            throw new Exception("訂單編號不存在", 7);
+        }
+
+        // 2. 讀取商品價格 (Batching)
         $productIds = [];
         foreach ($products as $p) {
             $pid = intval($p['product_id'] ?? 0);
@@ -44,33 +56,19 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 資料驗證
-
-        // 1. 檢查卡號是否存在
-        $checkCard = $Conn->execute("SELECT count(*) as count FROM card_id WHERE card_id = ?", [$cardId]);
-        if (!$checkCard || $checkCard->fetchObj()->count == 0) {
-            throw new Exception("卡號不存在", 2);
-        }
-
-        // 2. 檢查訂單編號是否存在
-        $checkOrder = $Conn->execute("SELECT count(*) as count FROM orders WHERE order_id = ?", [$orderNo]);
-        if (!$checkOrder || $checkOrder->fetchObj()->count == 0) {
-            throw new Exception("訂單編號不存在", 1);
-        }
-
         // 3. 檢查商品是否存在與格式
         foreach ($products as $p) {
             $pid = intval($p['product_id'] ?? 0);
             $qty = intval($p['quantity'] ?? 0);
 
             if ($pid <= 0) {
-                throw new Exception("商品編號格式異常或未提供", 1);
+                throw new Exception("商品編號格式異常或未提供", 3);
             }
             if ($qty <= 0) {
-                throw new Exception("商品數量格式異常或未提供", 1);
+                throw new Exception("商品數量格式異常或未提供", 4);
             }
             if (!isset($priceMap[$pid])) {
-                throw new Exception("商品編號不存在: " . $pid, 1);
+                throw new Exception("商品編號不存在: " . $pid, 5);
             }
         }
 
@@ -98,7 +96,8 @@ class StampPointMapping extends ApiTemplate
                     $isQualified = false; //預設該商品不符合活動資格
                     if ($eventType == 'ALL_PRODUCT') {
                         $isQualified = true;
-                    } else if ($eventType == 'SPECIFIC_PRODUCT') {
+                    }
+                    else if ($eventType == 'SPECIFIC_PRODUCT') {
                         // 檢查商品是否在該活動的指定清單中
                         $checkSql = "SELECT count(*) as count FROM stamp_product WHERE event_id = ? AND product_id = ?";
                         $checkRs = $Conn->execute($checkSql, [$eventId, $pid]);
@@ -138,11 +137,12 @@ class StampPointMapping extends ApiTemplate
         }
 
         $this->response['event_list'] = $eventList;
-        return $this->setResponse('0000', '接收成功');
+        return $this->setResponse('0006', '點數計算成功');
     }
 }
 
 if (isset($_SERVER['SCRIPT_FILENAME']) && realpath($_SERVER['SCRIPT_FILENAME']) == realpath(__FILE__)) {
     (new StampPointMapping())->run();
 }
+
 ?>
