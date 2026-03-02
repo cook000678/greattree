@@ -2,7 +2,8 @@
 // 模擬 API 呼叫測試
 require_once 'autoload.php';
 require_once 'StampPointMapping.php';
-require_once 'ModifyMemberLevel.php';
+// require_once 'ModifyMemberLevel.php';
+require_once 'AddPoint.php';
 
 class TestStampPointMapping extends StampPointMapping
 {
@@ -19,7 +20,22 @@ class TestStampPointMapping extends StampPointMapping
     }
 }
 
-class TestModifyMemberLevel extends ModifyMemberLevel
+// class TestModifyMemberLevel extends ModifyMemberLevel
+// {
+//     public function testRun($mockInput)
+//     {
+//         $this->input = $mockInput;
+//         try {
+//             $this->execute();
+//         }
+//         catch (\Throwable $th) {
+//             $this->setResponse(sprintf("%04d", $th->getCode()), $th->getMessage());
+//         }
+//         return $this->response;
+//     }
+// }
+
+class TestAddPoint extends AddPoint
 {
     public function testRun($mockInput)
     {
@@ -69,8 +85,16 @@ $memberData = [
     'level' => 2
 ];
 
-$apiModifyLevel = new TestModifyMemberLevel();
+// $apiModifyLevel = new TestModifyMemberLevel();
 // $res = $apiModifyLevel->testRun($memberData);
+
+$addPointData = [
+    "card_id" => "2ABC1D123EF11G",
+    "point_type" => "BONUS",
+    "point" => 10
+];
+$apiAddPoint = new TestAddPoint();
+$res = $apiAddPoint->testRun($addPointData);
 
 echo "--- 測試結果 (Mock Response) ---\n<br>";
 echo json_encode($res, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . "\n";
