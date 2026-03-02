@@ -2,8 +2,24 @@
 // 模擬 API 呼叫測試
 require_once 'autoload.php';
 require_once 'StampPointMapping.php';
+require_once 'ModifyMemberLevel.php';
 
 class TestStampPointMapping extends StampPointMapping
+{
+    public function testRun($mockInput)
+    {
+        $this->input = $mockInput;
+        try {
+            $this->execute();
+        }
+        catch (\Throwable $th) {
+            $this->setResponse(sprintf("%04d", $th->getCode()), $th->getMessage());
+        }
+        return $this->response;
+    }
+}
+
+class TestModifyMemberLevel extends ModifyMemberLevel
 {
     public function testRun($mockInput)
     {
@@ -47,6 +63,14 @@ $mockInput = [
 
 $api = new TestStampPointMapping();
 $res = $api->testRun($mockInput);
+
+$memberData = [
+    'account_id' => '1234256',
+    'level' => 2
+];
+
+$apiModifyLevel = new TestModifyMemberLevel();
+// $res = $apiModifyLevel->testRun($memberData);
 
 echo "--- 測試結果 (Mock Response) ---\n<br>";
 echo json_encode($res, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) . "\n";
