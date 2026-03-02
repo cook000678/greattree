@@ -22,7 +22,7 @@ class StampPointMapping extends ApiTemplate
             throw new Exception('串接異常，不為json格式', 9);
         }
 
-        // 批次讀取商品價格
+        // 讀取商品價格
         $productIds = [];
         foreach ($products as $p) {
             $pid = intval($p['product_id'] ?? 0);
@@ -44,7 +44,7 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 資料庫存在驗證
+        // 資料驗證
 
         // 1. 檢查卡號是否存在
         $checkCard = $Conn->execute("SELECT count(*) as count FROM card_id WHERE card_id = ?", [$cardId]);
@@ -98,8 +98,7 @@ class StampPointMapping extends ApiTemplate
                     $isQualified = false; //預設該商品不符合活動資格
                     if ($eventType == 'ALL_PRODUCT') {
                         $isQualified = true;
-                    }
-                    else if ($eventType == 'SPECIFIC_PRODUCT') {
+                    } else if ($eventType == 'SPECIFIC_PRODUCT') {
                         // 檢查商品是否在該活動的指定清單中
                         $checkSql = "SELECT count(*) as count FROM stamp_product WHERE event_id = ? AND product_id = ?";
                         $checkRs = $Conn->execute($checkSql, [$eventId, $pid]);
@@ -109,19 +108,19 @@ class StampPointMapping extends ApiTemplate
                     }
 
                     if ($isQualified) {
-                        // 直接從快取好的 priceMap 取得價格，不再進 DB 查詢
                         $price = $priceMap[$pid] ?? 0;
                         $qualifiedAmount += ($price * $qty);
                     }
                 }
 
-                // 3. 根據累積金額計算點數 (查找最接近且符合的門檻)
-                $ruleSql = "SELECT * FROM stamp_rule WHERE event_id = ? AND threshold_amount <= ? ORDER BY threshold_amount DESC LIMIT 1";
+                // 3. 根據累積金額計算點數
+                // where條件放總金額可以直接略過不符合的活動，不用抓出來後再判斷點數
+                $ruleSql = "SELECT * FROM stamp_rule WHERE event_id = ? AND threshold_amount <= ?";
                 $ruleRs = $Conn->execute($ruleSql, [$eventId, $qualifiedAmount]);
 
                 if ($ruleRs && $ruleRs->RecordCount() > 0) {
                     $rule = $ruleRs->fetchObj();
-                    // 計算贈送點數：(累積金額 / 門檻) * 單位贈點
+                    // 計算贈送點數：(累積金額 / 門檻) * 點數
                     $multiples = floor($qualifiedAmount / $rule->threshold_amount);
                     $rewardPoints = $multiples * $rule->reward_points;
 
