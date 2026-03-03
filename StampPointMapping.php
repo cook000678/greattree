@@ -126,7 +126,9 @@ class StampPointMapping extends ApiTemplate
                 $ruleRs = $Conn->execute("SELECT threshold_amount, reward_points FROM stamp_rule WHERE event_id = ? AND threshold_amount <= ?", [$event->id, $qualifiedAmount]);
                 if ($ruleRs && $ruleRs->RecordCount() > 0) {
                     $rule = $ruleRs->fetchObj();
-                    $rewardPoints = floor($qualifiedAmount / $rule->threshold_amount) * $rule->reward_points;
+                    // 不累贈邏輯：只要大於門檻，就只給一次獎勵點數
+                    $rewardPoints = $rule->reward_points;
+
                     if ($rewardPoints > 0) {
                         $eventList[] = [
                             'event_id' => intval($event->id),
