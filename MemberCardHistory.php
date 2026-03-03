@@ -10,7 +10,6 @@ class MemberCardHistory extends ApiTemplate
 
         $input = $this->input;
         $accountId = $input['account_id'] ?? '';
-        $cardId = $input['card_id'] ?? '';
         $pointType = $input['point_type'] ?? '';
 
         // 參數驗證
@@ -18,32 +17,22 @@ class MemberCardHistory extends ApiTemplate
             throw new Exception('account_id參數異常只限英文和數字共10碼', 1);
         }
 
-        if (!preg_match('/^[a-zA-Z0-9]{1,50}$/', $cardId)) {
-            throw new Exception('card_id參數異常只限英文和數字共50碼', 2);
-        }
-
         // 檢查資料
         // 1.檢查會員是否存在
         $member = new Member($DB);
         if (!$member->queryMember($accountId)) {
-            throw new Exception('會員不存在', 3);
+            throw new Exception('會員不存在', 2);
         }
 
-        // 2.檢查卡號是否存在
-        $card = new Card($DB);
-        if (!$card->queryCard($cardId)) {
-            throw new Exception('卡號不存在', 4);
-        }
-
-        // 3. 取得點數類型 ID
+        // 2. 取得點數類型 ID
         $queryPointType = $Conn->execute("SELECT type_id FROM point_types WHERE type_name = ?", [$pointType]);
         if (!$queryPointType || $queryPointType->RecordCount() == 0) {
-            throw new Exception('點數類型不存在', 5);
+            throw new Exception('點數類型不存在', 3);
         }
         $typeId = $queryPointType->fetchObj()->type_id;
 
         // 查詢點數紀錄
-        $queryPointHistory = $Conn->execute("SELECT create_at, point FROM point_history WHERE card_id = ? AND point_type = ? ORDER BY create_at DESC", [$cardId, $typeId]);
+        $queryPointHistory = $Conn->execute("SELECT create_at, point FROM point_history WHERE account_id = ? AND point_type = ? ORDER BY create_at DESC", [$accountId, $typeId]);
 
         $historyList = [];
         if ($queryPointHistory) {
