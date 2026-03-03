@@ -9,33 +9,54 @@ class StampPointMapping extends ApiTemplate
         $Conn = $DB->getConnection();
 
         $input = $this->input;
-        $cardId = $input['card_id'] ?? '';
+        $accountId = $input['account_id'] ?? '';
         $orderId = $input['order_no'] ?? '';
         $products = $input['products'] ?? [];
 
-        // 參數驗證
-        if (!preg_match('/^[a-zA-Z0-9]{1,50}$/', $cardId)) {
-            throw new Exception('card_id參數異常', 2);
+        // 1. 參數驗證
+        if (!preg_match('/^[a-zA-Z0-9]{1,10}$/', $accountId)) {
+            throw new Exception('account_id參數異常只限英文和數字共10碼', 1);
         }
 
-        // 檢查資料
         if (empty($products) || !is_array($products)) {
-            throw new Exception('串接異常，不為json格式', 9);
+            throw new Exception('商品格式異常', 7);
         }
 
-        // 1. 檢查卡號是否存在
-        $cardModel = new Card($DB);
-        if (!$cardModel->queryCard($cardId)) {
-            throw new Exception("卡號不存在", 1);
+        // 2. 檢查帳號是否存在
+        $memberModel = new Member($DB);
+        if (!$memberModel->queryMember($accountId)) {
+            throw new Exception("帳號不存在", 2);
         }
 
-        // 2. 檢查訂單編號是否存在
-        $checkOrder = $Conn->execute("SELECT count(*) as count FROM orders WHERE order_id = ?", [$orderId]);
-        if (!$checkOrder || $checkOrder->fetchObj()->count == 0) {
-            throw new Exception("訂單編號不存在", 7);
+        // 3. 檢查訂單是否存在 (greattree_orders)
+        $checkOrder = $Conn->execute("SELECT * FROM greattree_orders WHERE order_id = ? LIMIT 1", [$orderId]);
+
+        if ($checkOrder && $checkOrder->RecordCount() > 0) {
+            // 訂單已存在：從 point_history 抓取現有紀錄回傳
+            $historySql = "
+                SELECT h.point, h.refer_stamp_id as event_id, s.name as event_name
+                FROM point_history h
+                JOIN stamp s ON h.refer_stamp_id = s.id
+                WHERE h.refer_order_id = ? AND h.account_id = ?
+            ";
+            $historyRs = $Conn->execute($historySql, [$orderId, $accountId]);
+            $eventList = [];
+            if ($historyRs) {
+                while (!$historyRs->EOF) {
+                    $row = $historyRs->fetchObj();
+                    $eventList[] = [
+                        'event_id' => intval($row->event_id),
+                        'event_name' => $row->event_name,
+                        'point' => intval($row->point)
+                    ];
+                    $historyRs->MoveNext();
+                }
+            }
+            $this->response['event_list'] = $eventList;
+            return $this->setResponse('0006', '訂單已處理，回傳現有點數紀錄');
         }
 
-        // 2. 讀取商品價格
+        // 4. 訂單不存在：讀取商品價格與格式檢查
         $productIds = [];
         foreach ($products as $p) {
             $pid = intval($p['product_id'] ?? 0);
@@ -57,11 +78,9 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 3. 檢查商品是否存在與格式
         foreach ($products as $p) {
             $pid = intval($p['product_id'] ?? 0);
             $qty = intval($p['quantity'] ?? 0);
-
             if ($pid <= 0) {
                 throw new Exception("商品編號格式異常或未提供", 3);
             }
@@ -73,77 +92,87 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 1. 取得活動清單：必須是啟用中且在有效期限內
+        // 5. 取得活動清單並計算點數
         $now = date('Y-m-d H:i:s');
-        $sql = "SELECT * FROM stamp WHERE is_active = 1 AND start_time <= ? AND end_time >= ?";
+        $sql = "SELECT id, name, type FROM stamp WHERE is_active = 1 AND start_time <= ? AND end_time >= ?";
         $eventRs = $Conn->execute($sql, [$now, $now]);
 
         $eventList = [];
-
         if ($eventRs && $eventRs->RecordCount() > 0) {
             while (!$eventRs->EOF) {
                 $event = $eventRs->fetchObj();
-                $eventId = $event->id;
-                $eventName = $event->name;
-                $eventType = $event->type; // ALL_PRODUCT / SPECIFIC_PRODUCT
-
                 $qualifiedAmount = 0;
 
-                // 2. 計算該活動符合條件的累積金額
                 foreach ($products as $p) {
                     $pid = intval($p['product_id']);
                     $qty = intval($p['quantity']);
 
-                    $isQualified = false; //預設該商品不符合活動資格
-                    if ($eventType == 'ALL_PRODUCT') {
+                    $isQualified = false;
+                    if ($event->type == 'ALL_PRODUCT') {
                         $isQualified = true;
                     }
-                    else if ($eventType == 'SPECIFIC_PRODUCT') {
-                        // 檢查商品是否在該活動的指定清單中
-                        $checkSql = "SELECT count(*) as count FROM stamp_product WHERE event_id = ? AND product_id = ?";
-                        $checkRs = $Conn->execute($checkSql, [$eventId, $pid]);
+                    else if ($event->type == 'SPECIFIC_PRODUCT') {
+                        $checkRs = $Conn->execute("SELECT count(*) as count FROM stamp_product WHERE event_id = ? AND product_id = ?", [$event->id, $pid]);
                         if ($checkRs && $checkRs->fetchObj()->count > 0) {
                             $isQualified = true;
                         }
                     }
 
                     if ($isQualified) {
-                        $price = $priceMap[$pid] ?? 0;
-                        $qualifiedAmount += ($price * $qty);
+                        $qualifiedAmount += (($priceMap[$pid] ?? 0) * $qty);
                     }
                 }
 
-                // 3. 根據累積金額計算點數
-                // where條件放總金額可以直接略過不符合的活動，不用抓出來後再判斷點數
-                $ruleSql = "SELECT * FROM stamp_rule WHERE event_id = ? AND threshold_amount <= ?";
-                $ruleRs = $Conn->execute($ruleSql, [$eventId, $qualifiedAmount]);
-
+                $ruleRs = $Conn->execute("SELECT threshold_amount, reward_points FROM stamp_rule WHERE event_id = ? AND threshold_amount <= ?", [$event->id, $qualifiedAmount]);
                 if ($ruleRs && $ruleRs->RecordCount() > 0) {
                     $rule = $ruleRs->fetchObj();
-                    // 計算贈送點數：(累積金額 / 門檻) * 點數
-                    $multiples = floor($qualifiedAmount / $rule->threshold_amount);
-                    $rewardPoints = $multiples * $rule->reward_points;
-
+                    $rewardPoints = floor($qualifiedAmount / $rule->threshold_amount) * $rule->reward_points;
                     if ($rewardPoints > 0) {
                         $eventList[] = [
-                            'event_id' => intval($eventId),
-                            'event_name' => $eventName,
+                            'event_id' => intval($event->id),
+                            'event_name' => $event->name,
                             'point' => intval($rewardPoints)
                         ];
                     }
                 }
-
                 $eventRs->MoveNext();
             }
         }
 
+        // 6. 寫入資料庫記錄
+        if (!empty($eventList)) {
+            // A. 寫入大樹訂單表 (greattree_orders)
+            foreach ($products as $p) {
+                $Conn->autoExecute('greattree_orders', [
+                    'order_id' => $orderId,
+                    'account_id' => $accountId,
+                    'order_date' => date('Y-m-d'),
+                    'order_time' => date('H:i:s'),
+                    'product_id' => intval($p['product_id']),
+                    'quantity' => intval($p['quantity'])
+                ], 'INSERT');
+            }
+
+            // B. 寫入點數歷史 (point_history)
+            foreach ($eventList as $event) {
+                $Conn->autoExecute('point_history', [
+                    'account_id' => $accountId,
+                    'point_type' => 3, // STAMP
+                    'point' => $event['point'],
+                    'create_at' => date('Y-m-d H:i:s'),
+                    'note' => '',
+                    'refer_order_id' => $orderId,
+                    'refer_stamp_id' => $event['event_id']
+                ], 'INSERT');
+            }
+        }
+
         $this->response['event_list'] = $eventList;
-        return $this->setResponse('0006', '點數計算成功');
+        return $this->setResponse('0006', '點數計算成功並已記錄');
     }
 }
 
 if (isset($_SERVER['SCRIPT_FILENAME']) && realpath($_SERVER['SCRIPT_FILENAME']) == realpath(__FILE__)) {
     (new StampPointMapping())->run();
 }
-
 ?>
