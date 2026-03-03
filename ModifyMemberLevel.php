@@ -17,14 +17,17 @@ class ModifyMemberLevel extends ApiTemplate
             throw new Exception('account_id參數異常只限英文和數字共10碼', 3);
         }
 
-        if (filter_var($level, FILTER_VALIDATE_INT) === false || intval($level) <= 0) {
-            throw new Exception('level參數異常僅限大於0的正整數', 4);
+        //查詢會員等級是否存在
+        $queryLevel = $Conn->execute("SELECT * FROM member_level WHERE name = ?", [$level]);
+        if ($queryLevel->RecordCount() == 0) {
+            throw new Exception('會員等級不存在', 4);
         }
+        $levelId = $queryLevel->fetchObj()->id;
 
 
         // 1. 檢查會員是否存在與修改等級
         $member = new Member($DB);
-        $member->modifyMemberLevel($account_id, $level);
+        $member->modifyMemberLevel($account_id, $levelId);
 
         return $this->setResponse('0006', '會員等級更新成功');
     }
