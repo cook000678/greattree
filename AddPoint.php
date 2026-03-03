@@ -9,13 +9,13 @@ class AddPoint extends ApiTemplate
         $Conn = $DB->getConnection();
 
         $input = $this->input;
-        $cardId = $input['card_id'] ?? '';
+        $accountId = $input['account_id'] ?? '';
         $pointType = $input['point_type'] ?? '';
         $point = $input['point'] ?? 0;
 
         // 參數驗證
-        if (!preg_match('/^[a-zA-Z0-9]{1,50}$/', $cardId)) {
-            throw new Exception('card_id參數異常只限英文和數字共50碼', 1);
+        if (!preg_match('/^[a-zA-Z0-9]{1,10}$/', $accountId)) {
+            throw new Exception('account_id參數異常只限英文和數字共10碼', 1);
         }
 
         if (!is_numeric($point) || $point <= 0) {
@@ -23,10 +23,10 @@ class AddPoint extends ApiTemplate
         }
 
         // 檢查資料
-        // 1. 查詢卡號
-        $card = new Card($DB);
-        if (!$card->queryCard($cardId)) {
-            throw new Exception('卡號不存在', 3);
+        // 1. 查詢會員
+        $member = new Member($DB);
+        if (!$member->queryMember($accountId)) {
+            throw new Exception('會員不存在', 3);
         }
 
         // 2. 取得點數類型 ID
@@ -38,15 +38,17 @@ class AddPoint extends ApiTemplate
 
         $note = $input['note'] ?? '';
         $referOrderId = $input['refer_order_id'] ?? '';
+        $referStampId = intval($input['refer_stamp_id'] ?? 0); // 預設 0 防止資料庫出錯
 
         // 寫入點數
         $insertData = [
-            'card_id' => $cardId,
+            'account_id' => $accountId,
             'point_type' => $typeId,
-            'point' => $point,
+            'point' => intval($point),
             'create_at' => date('Y-m-d H:i:s'),
             'note' => $note,
-            'refer_order_id' => $referOrderId
+            'refer_order_id' => $referOrderId,
+            'refer_stamp_id' => $referStampId
         ];
 
         $addPoint = $Conn->autoExecute('point_history', $insertData, 'INSERT');
