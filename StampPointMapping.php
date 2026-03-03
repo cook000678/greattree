@@ -18,6 +18,7 @@ class StampPointMapping extends ApiTemplate
             throw new Exception('card_id參數異常', 2);
         }
 
+        // 檢查資料
         if (empty($products) || !is_array($products)) {
             throw new Exception('串接異常，不為json格式', 9);
         }
@@ -34,7 +35,7 @@ class StampPointMapping extends ApiTemplate
             throw new Exception("訂單編號不存在", 7);
         }
 
-        // 2. 讀取商品價格 (Batching)
+        // 2. 讀取商品價格
         $productIds = [];
         foreach ($products as $p) {
             $pid = intval($p['product_id'] ?? 0);

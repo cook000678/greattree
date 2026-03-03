@@ -57,7 +57,7 @@ class MemberCardHistory extends ApiTemplate
             }
         }
 
-        $this->response['point_hostory'] = $historyList;
+        $this->response['point_history'] = $historyList;
         return $this->setResponse('0006', '點數記錄查詢成功');
     }
 }

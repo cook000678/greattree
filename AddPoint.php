@@ -44,6 +44,7 @@ class AddPoint extends ApiTemplate
             'card_id' => $cardId,
             'point_type' => $typeId,
             'point' => $point,
+            'create_at' => date('Y-m-d H:i:s'),
             'note' => $note,
             'refer_order_id' => $referOrderId
         ];
