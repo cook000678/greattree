@@ -6,7 +6,7 @@ class DB
     function __construct()
     {
         $configure = [
-            'hostname' => '127.0.0.1',
+            'hostname' => 'gt-db',
             'username' => 'root',
             'password' => 'root',
             'database' => 'greattree_member',
