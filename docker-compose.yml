@@ -10,6 +10,7 @@ services:
       - ../Tools:/var/www/html/Tools
     networks:
       - gt-network
+      - company-network
 
   # GreatTree 專案 MySQL 8.0
   gt-db:
@@ -25,22 +26,26 @@ services:
       - gt_db_data:/var/lib/mysql
     networks:
       - gt-network
+      - company-network
 
-  # GreatTree 專屬 phpMyAdmin
+  # GreatTree 專屬 phpMyAdmin (已合併管理 DrYang)
   gt-pma:
     image: phpmyadmin/phpmyadmin
     container_name: gt_pma
     environment:
-      PMA_HOST: gt-db
+      PMA_HOSTS: gt-db,dryang-db
       MYSQL_ROOT_PASSWORD: root
     ports:
       - "8083:80" # http://localhost:8083
     networks:
       - gt-network
+      - company-network
 
 networks:
   gt-network:
     driver: bridge
+  company-network:
+    external: true
 
 volumes:
   gt_db_data:
