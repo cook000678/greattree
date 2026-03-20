@@ -102,6 +102,19 @@ class StampPointMapping extends ApiTemplate
             while (!$eventRs->EOF) {
                 $event = $eventRs->fetchObj();
                 $qualifiedAmount = 0;
+                $qualifiedQuantity = 0;
+
+                // 先找出該活動的所有符合商品 ids (如果是 SPECIFIC_PRODUCT)
+                $specificProductIds = [];
+                if ($event->type == 'SPECIFIC_PRODUCT') {
+                    $spRs = $Conn->execute("SELECT product_id FROM stamp_product WHERE event_id = ?", [$event->id]);
+                    if ($spRs) {
+                        while (!$spRs->EOF) {
+                            $specificProductIds[] = intval($spRs->fetchObj()->product_id);
+                            $spRs->MoveNext();
+                        }
+                    }
+                }
 
                 foreach ($products as $p) {
                     $pid = intval($p['product_id']);
@@ -110,24 +123,40 @@ class StampPointMapping extends ApiTemplate
                     $isQualified = false;
                     if ($event->type == 'ALL_PRODUCT') {
                         $isQualified = true;
-                    }
-                    else if ($event->type == 'SPECIFIC_PRODUCT') {
-                        $checkRs = $Conn->execute("SELECT count(*) as count FROM stamp_product WHERE event_id = ? AND product_id = ?", [$event->id, $pid]);
-                        if ($checkRs && $checkRs->fetchObj()->count > 0) {
+                    } else if ($event->type == 'SPECIFIC_PRODUCT') {
+                        if (in_array($pid, $specificProductIds)) {
                             $isQualified = true;
                         }
                     }
 
                     if ($isQualified) {
                         $qualifiedAmount += (($priceMap[$pid] ?? 0) * $qty);
+                        $qualifiedQuantity += $qty;
                     }
                 }
 
-                $ruleRs = $Conn->execute("SELECT threshold_amount, reward_points FROM stamp_rule WHERE event_id = ? AND threshold_amount <= ?", [$event->id, $qualifiedAmount]);
+                // 取得規則，並依門檻金額由高到低排序，以利找出符合的最高門檻
+                $ruleSql = "SELECT threshold_type, threshold_amount, reward_points FROM stamp_rule WHERE event_id = ? ORDER BY threshold_amount DESC";
+                $ruleRs = $Conn->execute($ruleSql, [$event->id]);
+
                 if ($ruleRs && $ruleRs->RecordCount() > 0) {
-                    $rule = $ruleRs->fetchObj();
-                    // 不累贈邏輯：只要大於門檻，就只給一次獎勵點數
-                    $rewardPoints = $rule->reward_points;
+                    $rewardPoints = 0;
+                    while (!$ruleRs->EOF) {
+                        $rule = $ruleRs->fetchObj();
+                        // 依照模式判斷是否達標：1.滿額(AMOUNT) 2.滿件(QUANTITY)
+                        if ($rule->threshold_type == 'AMOUNT') {
+                            if ($qualifiedAmount >= $rule->threshold_amount) {
+                                $rewardPoints = $rule->reward_points;
+                                break;
+                            }
+                        } else if ($rule->threshold_type == 'QUANTITY') {
+                            if ($qualifiedQuantity >= $rule->threshold_amount) {
+                                $rewardPoints = $rule->reward_points;
+                                break;
+                            }
+                        }
+                        $ruleRs->MoveNext();
+                    }
 
                     if ($rewardPoints > 0) {
                         $eventList[] = [
