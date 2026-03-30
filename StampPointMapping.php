@@ -191,6 +191,7 @@ class StampPointMapping extends ApiTemplate
                     'point' => $event['point'],
                     'create_at' => date('Y-m-d H:i:s'),
                     'note' => '',
+                    "refer" => "",
                     'refer_order_id' => $orderId,
                     'refer_stamp_id' => $event['event_id']
                 ], 'INSERT');

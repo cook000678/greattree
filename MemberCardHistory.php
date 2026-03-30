@@ -25,22 +25,24 @@ class MemberCardHistory extends ApiTemplate
         }
 
         // 2. 取得點數類型 ID
-        $queryPointType = $Conn->execute("SELECT type_id FROM point_types WHERE type_name = ?", [$pointType]);
+        $queryPointType = $Conn->execute("SELECT type_id FROM point_types WHERE type_key = ?", [$pointType]);
         if (!$queryPointType || $queryPointType->RecordCount() == 0) {
             throw new Exception('點數類型不存在', 3);
         }
         $typeId = $queryPointType->fetchObj()->type_id;
 
         // 查詢點數紀錄
-        $queryPointHistory = $Conn->execute("SELECT create_at, point FROM point_history WHERE account_id = ? AND point_type = ? ORDER BY create_at DESC", [$accountId, $typeId]);
+        $queryPointHistory = $Conn->execute("SELECT create_at, point, refer, note FROM point_history WHERE account_id = ? AND point_type = ? ORDER BY create_at DESC", [$accountId, $typeId]);
 
         $historyList = [];
         if ($queryPointHistory) {
             while (!$queryPointHistory->EOF) {
                 $row = $queryPointHistory->fetchObj();
                 $historyList[] = [
-                    'date' => date('Y-m-d', strtotime($row->create_at)),
-                    'point' => intval($row->point)
+                    'date' => date('Y-m-d H:i:s', strtotime($row->create_at)),
+                    'point' => intval($row->point),
+                    'refer' => $row->refer,
+                    'note' => $row->note
                 ];
                 $queryPointHistory->MoveNext();
             }
