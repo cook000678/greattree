@@ -11,7 +11,7 @@ class AddPoint extends ApiTemplate
         $input = $this->input;
         $accountId = $input['account_id'] ?? '';
         $pointType = $input['point_type'] ?? '';
-        $point = $input['point'] ?? 0;
+        $point = $input['point'] ?? '';
         $refer = $input['refer'] ?? '';
 
         // 參數驗證
@@ -20,11 +20,11 @@ class AddPoint extends ApiTemplate
         }
 
         if (!is_numeric($point)) {
-            throw new Exception('point參數異常，僅限數字', 2);
+            throw new Exception('point參數為必填且僅限數字', 2);
         }
 
         if (!in_array($refer, ['門市', '線上'])) {
-            throw new Exception('refer參數異常，僅限門市或線上', 3);
+            throw new Exception('refer參數為必填僅限門市或線上', 3);
         }
 
         // 檢查資料
