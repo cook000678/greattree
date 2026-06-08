@@ -33,7 +33,7 @@ services:
     image: phpmyadmin/phpmyadmin
     container_name: gt_pma
     environment:
-      PMA_HOSTS: gt-db,dryang-db
+      PMA_HOSTS: gt-db,dryang-db,mfbc-db
       MYSQL_ROOT_PASSWORD: root
     ports:
       - "8083:80" # http://localhost:8083
