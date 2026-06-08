@@ -8,33 +8,33 @@ class CreateVoucher extends ApiTemplate
         $DB = new DB();
         $Conn = $DB->getConnection();
 
-        $input = $this->input;
-        $redeemType = $input['redeem_type'] ?? '';
-        $type = $input['type'] ?? '';
-        $voucherName = $input['voucher_name'] ?? '';
-        $quantity = $input['quantity'] ?? '';
-        $skuId = $input['sku_id'] ?? null;
-        $storeSkuId = $input['store_sku_id'] ?? '';
+        $input          = $this->input;
+        $type           = $input['type'] ?? ''; // 商品類型 (TICKET/DELIVERY)
+        $voucherName    = trim($input['voucher_name'] ?? ''); // 商品名稱
+        $quantity       = $input['quantity'] ?? ''; // 庫存數量
+        $skuId          = $input['sku_id'] ?? null; // 對應6編碼
+        $storeSkuId     = trim($input['store_sku_id'] ?? ''); // 商派優惠券ID
+        $remarks        = $input['remarks'] ?? ''; // 注意事項
 
-        // 參數驗證 (sku_id 非必填，其餘必填)
-        if (!is_int($redeemType) && !(is_string($redeemType) && ctype_digit($redeemType))) {
-            throw new Exception('redeem_type參數型態異常，僅限數字', 1);
-        }
-
+        // 參數驗證 (sku_id、remarks 非必填，其餘必填)
         if (!is_string($type) || strlen($type) > 8 || $type === '') {
-            throw new Exception('type參數型態異常，僅限8碼字串', 2);
+            throw new Exception('type參數型態異常，僅限8碼字串', 1);
         }
 
         if($type != 'TICKET' && $type != 'DELIVERY') {
-            throw new Exception('type參數型態異常，僅限TICKET或DELIVERY', 3);
+            throw new Exception('type參數型態異常，僅限TICKET或DELIVERY', 2);
         }
 
         if (!is_string($voucherName) || strlen($voucherName) > 30 || $voucherName === '') {
-            throw new Exception('voucher_name參數型態異常，僅限30碼字串', 4);
+            throw new Exception('voucher_name參數型態異常，僅限30碼字串', 3);
         }
 
         if (!is_int($quantity) && !(is_string($quantity) && ctype_digit($quantity))) {
-            throw new Exception('quantity參數型態異常，僅限數字', 5);
+            throw new Exception('quantity參數型態異常，僅限整數', 4);
+        }
+
+        if ((int)$quantity <= 0) {
+            throw new Exception('quantity必須大於0', 5);
         }
 
         if ($skuId !== null && $skuId !== '' && (!is_string($skuId) || strlen($skuId) > 20)) {
@@ -45,23 +45,30 @@ class CreateVoucher extends ApiTemplate
             throw new Exception('store_sku_id參數型態異常，僅限50碼字串', 10);
         }
 
+        // 不是int和float，且 is_string($remarks) ===false就會進去else
+        // 例如 array，bool，object，null，等等
+        if (is_int($remarks) || is_float($remarks)) {
+            $remarks = (string)$remarks;
+        } elseif (!is_string($remarks)) {
+            throw new Exception('remarks參數型態異常，需為字串', 11);
+        }
+
         // 寫入商品券
         $insertData = [
-            'redeem_type' => (int)$redeemType,
             'type' => $type,
-            'sku_id' => ($skuId === '' ? null : $skuId),
-            'store_sku_id' => $storeSkuId,
-            'name' => $voucherName,
+            'sku_id' => ($skuId === '' ? null : (string)$skuId),
+            'store_sku_id' => (string)$storeSkuId,
+            'name' => (string)$voucherName,
             'prices' => 0,
             'quantity' => (int)$quantity,
             'image_url' => '',
-            'remarks' => '',
-            'is_active' => 0
+            'remarks' => $remarks,
+            'is_active' => 1
         ];
 
         $createVoucher = $Conn->autoExecute('voucher', $insertData, 'INSERT');
         if (!$createVoucher) {
-            throw new Exception('建立失敗', 11);
+            throw new Exception('建立失敗', 12);
         }
 
         return $this->setResponse('0006', '建立成功');
