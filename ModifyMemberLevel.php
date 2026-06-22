@@ -13,8 +13,8 @@ class ModifyMemberLevel extends ApiTemplate
         $level = $input['level'] ?? '';
 
         // 參數驗證
-        if (!preg_match('/^[a-zA-Z0-9]{1,10}$/', $account_id)) {
-            throw new Exception('account_id參數異常只限英文和數字共10碼', 3);
+        if (!preg_match('/^[a-zA-Z0-9]{1,20}$/', $account_id)) {
+            throw new Exception('account_id參數異常只限英文和數字共20碼', 3);
         }
 
         //查詢會員等級是否存在

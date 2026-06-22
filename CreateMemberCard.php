@@ -15,7 +15,7 @@
             $accountId  = $input['account_id'];
             $cardId     = $input['card_id'];
 
-            if (!preg_match('/^[a-zA-Z0-9]{1,10}$/', $accountId)) {
+            if (!preg_match('/^[a-zA-Z0-9]{1,20}$/', $accountId)) {
                 return $this->setResponse('0001', 'account_id參數異常');
             }
 

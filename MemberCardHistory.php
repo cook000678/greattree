@@ -13,8 +13,8 @@ class MemberCardHistory extends ApiTemplate
         $pointType = $input['point_type'] ?? '';
 
         // 參數驗證
-        if (!preg_match('/^[a-zA-Z0-9]{1,10}$/', $accountId)) {
-            throw new Exception('account_id參數異常只限英文和數字共10碼', 1);
+        if (!preg_match('/^[a-zA-Z0-9]{1,20}$/', $accountId)) {
+            throw new Exception('account_id參數異常只限英文和數字共20碼', 1);
         }
 
         // 檢查資料
