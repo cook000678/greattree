@@ -4,39 +4,10 @@ services:
     build: .
     container_name: gt_php72_server
     ports:
-      - "80:80" # 直接對應 80 埠，不需輸入 Port 號
+      - "80:80" # http://localhost
     volumes:
       - .:/var/www/html/greattree
       - ../Tools:/var/www/html/Tools
-    networks:
-      - gt-network
-      - company-network
-
-  # GreatTree 專案 MySQL 8.0
-  gt-db:
-    image: mysql:8.0
-    container_name: gt_mysql_8
-    command: --default-authentication-plugin=mysql_native_password
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: greattree_member
-    ports:
-      - "3306:3306" # 使用標準 3306
-    volumes:
-      - gt_db_data:/var/lib/mysql
-    networks:
-      - gt-network
-      - company-network
-
-  # GreatTree 專屬 phpMyAdmin (已合併管理 DrYang)
-  gt-pma:
-    image: phpmyadmin/phpmyadmin
-    container_name: gt_pma
-    environment:
-      PMA_HOSTS: gt-db,dryang-db,mfbc-db
-      MYSQL_ROOT_PASSWORD: root
-    ports:
-      - "8083:80" # http://localhost:8083
     networks:
       - gt-network
       - company-network
@@ -46,6 +17,3 @@ networks:
     driver: bridge
   company-network:
     external: true
-
-volumes:
-  gt_db_data:

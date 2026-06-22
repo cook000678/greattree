@@ -59,7 +59,7 @@ class StampPointMapping extends ApiTemplate
         // 4. 訂單不存在：讀取商品價格與格式檢查
         $productIds = [];
         foreach ($products as $p) {
-            $pid = intval($p['products'] ?? 0);
+            $pid = intval($p['product_id'] ?? 0);
             if ($pid > 0)
                 $productIds[] = $pid;
         }
@@ -78,7 +78,7 @@ class StampPointMapping extends ApiTemplate
             }
         }
         foreach ($products as $p) {
-            $pid = intval($p['products'] ?? 0);
+            $pid = intval($p['product_id'] ?? 0);
             $qty = intval($p['quantity'] ?? 0);
             if ($pid <= 0) {
                 throw new Exception("商品編號格式異常或未提供", 3);
@@ -116,7 +116,7 @@ class StampPointMapping extends ApiTemplate
                 }
 
                 foreach ($products as $p) {
-                    $pid = intval($p['products']);
+                    $pid = intval($p['product_id']);
                     $qty = intval($p['quantity']);
 
                     $isQualified = false;
@@ -178,7 +178,7 @@ class StampPointMapping extends ApiTemplate
                     'account_id' => $accountId,
                     'order_date' => date('Y-m-d'),
                     'order_time' => date('H:i:s'),
-                    'product_id' => intval($p['products']),
+                    'product_id' => intval($p['product_id']),
                     'quantity' => intval($p['quantity'])
                 ], 'INSERT');
             }

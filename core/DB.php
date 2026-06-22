@@ -6,7 +6,7 @@ class DB
     function __construct()
     {
         $configure = [
-            'hostname' => 'gt-db',
+            'hostname' => 'shared-db-test',
             'username' => 'root',
             'password' => 'root',
             'database' => 'greattree_member',
@@ -14,6 +14,7 @@ class DB
         ];
         $connection = ADONewConnection($configure['dbdriver']);
         $connection->PConnect($configure['hostname'], $configure['username'], $configure['password'], $configure['database']);
+        $connection->Execute("SET NAMES 'utf8mb4'");
         $this->connection = $connection;
     }
 
