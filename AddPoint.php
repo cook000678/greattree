@@ -9,10 +9,10 @@ class AddPoint extends ApiTemplate
         $Conn = $DB->getConnection();
 
         $input = $this->input;
-        $accountId = $input['account_id'] ?? '';
-        $pointType = $input['point_type'] ?? '';
-        $point = $input['point'] ?? '';
-        $refer = $input['refer'] ?? '';
+        $accountId  = isset($input['account_id']) ? $input['account_id'] : '';
+        $pointType  = isset($input['point_type']) ? $input['point_type'] : '';
+        $point      = isset($input['point']) ? $input['point'] : '';
+        $refer      = isset($input['refer']) ? $input['refer'] : '';
 
         // 參數驗證
         if (!preg_match('/^[a-zA-Z0-9]{1,20}$/', $accountId)) {
@@ -41,8 +41,8 @@ class AddPoint extends ApiTemplate
         }
         $typeId = $queryPointType->fetchObj()->type_id;
 
-        $note = $input['note'] ?? '';
-        // $referOrderId = $input['refer_order_id'] ?? '';
+        $note = isset($input['note']) ? $input['note'] : '';
+        // $referOrderId = isset($input['refer_order_id']) ? $input['refer_order_id'] : '';
         // $referStampId = intval($input['refer_stamp_id'] ?? 0); // 預設 0 防止資料庫出錯
 
         // 寫入點數
@@ -70,5 +70,3 @@ class AddPoint extends ApiTemplate
 if (isset($_SERVER['SCRIPT_FILENAME']) && realpath($_SERVER['SCRIPT_FILENAME']) == realpath(__FILE__)) {
     (new AddPoint())->run();
 }
-
-?>

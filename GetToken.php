@@ -11,8 +11,9 @@ class GetToken extends ApiTemplate
         $Conn = $DB->getConnection();
 
         $input = $this->input;
-        $accountId = $input['account_id'] ?? '';
-        $secretKey = $input['secret_key'] ?? '';
+        $accountId = isset($input['account_id']) ? $input['account_id'] : '';
+        $secretKey = isset($input['secret_key']) ? $input['secret_key'] : '';
+        $redirectPage = isset($input['redirect_page']) ? $input['redirect_page'] : '';
 
         // 1. 參數驗證
         if (!preg_match('/^[a-zA-Z0-9]{1,20}$/', $accountId)) {
@@ -27,6 +28,10 @@ class GetToken extends ApiTemplate
         $memberModel = new Member($DB);
         if (!$memberModel->queryMember($accountId)) {
             throw new Exception("帳號不存在", 3);
+        }
+
+        if (isset($redirectPage) && !in_array($redirectPage, ['point', 'stamp'])) {
+            throw new Exception('redirect_page參數異常', 5);
         }
 
         // 3. 檢查現有的有效 Token
@@ -55,6 +60,7 @@ class GetToken extends ApiTemplate
             $insertData = [
                 'code' => $token,
                 'account_id' => $accountId,
+                'redirect_page' => $input['redirect_page'] ?? 'point',
                 'expire_at' => $expireAt,
                 'create_at' => $now
             ];
@@ -74,4 +80,3 @@ class GetToken extends ApiTemplate
 if (isset($_SERVER['SCRIPT_FILENAME']) && realpath($_SERVER['SCRIPT_FILENAME']) == realpath(__FILE__)) {
     (new GetToken())->run();
 }
-?>

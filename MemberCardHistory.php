@@ -9,8 +9,8 @@ class MemberCardHistory extends ApiTemplate
         $Conn = $DB->getConnection();
 
         $input = $this->input;
-        $accountId = $input['account_id'] ?? '';
-        $pointType = $input['point_type'] ?? '';
+        $accountId = isset($input['account_id']) ? $input['account_id'] : '';
+        $pointType = isset($input['point_type']) ? $input['point_type'] : '';
 
         // 參數驗證
         if (!preg_match('/^[a-zA-Z0-9]{1,20}$/', $accountId)) {
@@ -56,4 +56,3 @@ class MemberCardHistory extends ApiTemplate
 if (isset($_SERVER['SCRIPT_FILENAME']) && realpath($_SERVER['SCRIPT_FILENAME']) == realpath(__FILE__)) {
     (new MemberCardHistory())->run();
 }
-?>

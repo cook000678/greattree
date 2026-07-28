@@ -9,8 +9,8 @@ class modifyVoucherTicket extends ApiTemplate
         $Conn = $DB->getConnection();
 
         $input = $this->input;
-        $voucherCode = $input['voucher_code'] ?? ''; // 票券編號
-        $modifyType = $input['modify_type'] ?? ''; // 異動類型 (redeem 核銷/refund 作廢/reverse 反核銷)
+        $voucherCode    = isset($input['voucher_code']) ? $input['voucher_code'] : ''; // 票券編號
+        $modifyType     = isset($input['modify_type']) ? $input['modify_type'] : ''; // 異動類型 (redeem 核銷/refund 作廢/reverse 反核銷)
 
         // 參數驗證
         if (!is_string($voucherCode) || strlen($voucherCode) > 20 || $voucherCode === '') {
@@ -98,4 +98,3 @@ class modifyVoucherTicket extends ApiTemplate
 if (isset($_SERVER['SCRIPT_FILENAME']) && realpath($_SERVER['SCRIPT_FILENAME']) == realpath(__FILE__)) {
     (new modifyVoucherTicket())->run();
 }
-?>

@@ -9,8 +9,8 @@ class ModifyMemberLevel extends ApiTemplate
         $Conn = $DB->getConnection();
 
         $input = $this->input;
-        $account_id = $input['account_id'] ?? '';
-        $level = $input['level'] ?? '';
+        $account_id = isset($input['account_id']) ? $input['account_id'] : '';
+        $level      = isset($input['level']) ? $input['level'] : '';
 
         // 參數驗證
         if (!preg_match('/^[a-zA-Z0-9]{1,20}$/', $account_id)) {
@@ -36,4 +36,3 @@ class ModifyMemberLevel extends ApiTemplate
 if (isset($_SERVER['SCRIPT_FILENAME']) && realpath($_SERVER['SCRIPT_FILENAME']) == realpath(__FILE__)) {
     (new ModifyMemberLevel())->run();
 }
-?>

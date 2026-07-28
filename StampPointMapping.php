@@ -9,10 +9,10 @@ class StampPointMapping extends ApiTemplate
         $Conn = $DB->getConnection();
 
         $input = $this->input;
-        $accountId = $input['account_id'] ?? '';
-        $orderId = $input['order_no'] ?? '';
-        $products = $input['products'] ?? [];
-        
+        $accountId = isset($input['account_id']) ? $input['account_id'] : '';
+        $orderId = isset($input['order_no']) ? $input['order_no'] : '';
+        $products = isset($input['products']) ? $input['products'] : [];
+
         // 1. 參數驗證
         if (!preg_match('/^[a-zA-Z0-9]{1,20}$/', $accountId)) {
             throw new Exception('account_id參數異常只限英文和數字共20碼', 1);
@@ -59,7 +59,7 @@ class StampPointMapping extends ApiTemplate
         // 4. 訂單不存在：讀取商品價格與格式檢查
         $productIds = [];
         foreach ($products as $p) {
-            $pid = intval($p['product_id'] ?? 0);
+            $pid = intval(isset($p['product_id']) ? $p['product_id'] : 0);
             if ($pid > 0)
                 $productIds[] = $pid;
         }
@@ -78,8 +78,8 @@ class StampPointMapping extends ApiTemplate
             }
         }
         foreach ($products as $p) {
-            $pid = intval($p['product_id'] ?? 0);
-            $qty = intval($p['quantity'] ?? 0);
+            $pid = intval(isset($p['product_id']) ? $p['product_id'] : 0);
+            $qty = intval(isset($p['quantity']) ? $p['quantity'] : 0);
             if ($pid <= 0) {
                 throw new Exception("商品編號格式異常或未提供", 3);
             }
@@ -129,7 +129,7 @@ class StampPointMapping extends ApiTemplate
                     }
 
                     if ($isQualified) {
-                        $qualifiedAmount += (($priceMap[$pid] ?? 0) * $qty);
+                        $qualifiedAmount += ((isset($priceMap[$pid]) ? $priceMap[$pid] : 0) * $qty);
                         $qualifiedQuantity += $qty;
                     }
                 }
@@ -206,4 +206,3 @@ class StampPointMapping extends ApiTemplate
 if (isset($_SERVER['SCRIPT_FILENAME']) && realpath($_SERVER['SCRIPT_FILENAME']) == realpath(__FILE__)) {
     (new StampPointMapping())->run();
 }
-?>

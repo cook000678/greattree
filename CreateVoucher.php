@@ -9,19 +9,19 @@ class CreateVoucher extends ApiTemplate
         $Conn = $DB->getConnection();
 
         $input          = $this->input;
-        $type           = $input['type'] ?? ''; // 商品類型 (TICKET/DELIVERY)
-        $voucherName    = trim($input['voucher_name'] ?? ''); // 商品名稱
-        $quantity       = $input['quantity'] ?? ''; // 庫存數量
-        $skuId          = $input['sku_id'] ?? null; // 對應6編碼
-        $storeSkuId     = trim($input['store_sku_id'] ?? ''); // 商派優惠券ID
-        $remarks        = $input['remarks'] ?? ''; // 注意事項
+        $type           = isset($input['type']) ? $input['type'] : ''; // 商品類型 (TICKET/DELIVERY)
+        $voucherName    = trim(isset($input['voucher_name']) ? $input['voucher_name'] : ''); // 商品名稱
+        $quantity       = isset($input['quantity']) ? $input['quantity'] : ''; // 庫存數量
+        $skuId          = isset($input['sku_id']) ? $input['sku_id'] : null; // 對應6編碼
+        $storeSkuId     = trim(isset($input['store_sku_id']) ? $input['store_sku_id'] : ''); // 商派優惠券ID
+        $remarks        = isset($input['remarks']) ? $input['remarks'] : ''; // 注意事項
 
         // 參數驗證 (sku_id、remarks 非必填，其餘必填)
         if (!is_string($type) || strlen($type) > 8 || $type === '') {
             throw new Exception('type參數型態異常，僅限8碼字串', 1);
         }
 
-        if($type != 'TICKET' && $type != 'DELIVERY') {
+        if ($type != 'TICKET' && $type != 'DELIVERY') {
             throw new Exception('type參數型態異常，僅限TICKET或DELIVERY', 2);
         }
 
@@ -78,4 +78,3 @@ class CreateVoucher extends ApiTemplate
 if (isset($_SERVER['SCRIPT_FILENAME']) && realpath($_SERVER['SCRIPT_FILENAME']) == realpath(__FILE__)) {
     (new CreateVoucher())->run();
 }
-?>
