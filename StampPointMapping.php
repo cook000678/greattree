@@ -12,10 +12,15 @@ class StampPointMapping extends ApiTemplate
         $accountId = isset($input['account_id']) ? $input['account_id'] : '';
         $orderId = isset($input['order_no']) ? $input['order_no'] : '';
         $products = isset($input['products']) ? $input['products'] : [];
+        $transactionType = isset($input['transaction_type']) ? $input['transaction_type'] : '';
 
         // 1. 參數驗證
         if (!preg_match('/^[a-zA-Z0-9]{1,20}$/', $accountId)) {
             throw new Exception('account_id參數異常只限英文和數字共20碼', 1);
+        }
+
+        if (!in_array($transactionType, ['ADD', 'DEDUCT'])) {
+            throw new Exception('transaction_type參數異常，僅限ADD或DEDUCT', 12);
         }
 
         if (empty($products) || !is_array($products)) {
@@ -28,40 +33,13 @@ class StampPointMapping extends ApiTemplate
             throw new Exception("帳號不存在", 2);
         }
 
-        // 3. 檢查訂單是否存在 (greattree_orders)
-        $checkOrder = $Conn->execute("SELECT * FROM greattree_orders WHERE order_id = ? LIMIT 1", [$orderId]);
-
-        if ($checkOrder && $checkOrder->RecordCount() > 0) {
-            // 訂單已存在：從 point_history 抓取現有紀錄回傳
-            $historySql = "
-                SELECT h.point, h.refer_stamp_id as event_id, s.name as event_name
-                FROM point_history h
-                JOIN stamp s ON h.refer_stamp_id = s.id
-                WHERE h.refer_order_id = ? AND h.account_id = ?
-            ";
-            $historyRs = $Conn->execute($historySql, [$orderId, $accountId]);
-            $eventList = [];
-            if ($historyRs) {
-                while (!$historyRs->EOF) {
-                    $row = $historyRs->fetchObj();
-                    $eventList[] = [
-                        'event_id' => intval($row->event_id),
-                        'event_name' => $row->event_name,
-                        'point' => intval($row->point)
-                    ];
-                    $historyRs->MoveNext();
-                }
-            }
-            $this->response['event_list'] = $eventList;
-            return $this->setResponse('0006', '訂單已處理，回傳現有點數紀錄');
-        }
-
-        // 4. 訂單不存在：讀取商品價格與格式檢查
+        // 3. 讀取商品價格與格式檢查
         $productIds = [];
         foreach ($products as $p) {
             $pid = intval(isset($p['product_id']) ? $p['product_id'] : 0);
-            if ($pid > 0)
+            if ($pid > 0) {
                 $productIds[] = $pid;
+            }
         }
         $productIds = array_unique($productIds);
 
@@ -77,6 +55,7 @@ class StampPointMapping extends ApiTemplate
                 }
             }
         }
+
         foreach ($products as $p) {
             $pid = intval(isset($p['product_id']) ? $p['product_id'] : 0);
             $qty = intval(isset($p['quantity']) ? $p['quantity'] : 0);
@@ -91,12 +70,83 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 5. 取得活動清單並計算點數
+        // 3.5. 先行撈取當前訂單的商品累積總量，進行安全比對驗證 (改查歷史明細表 greattree_order_history)
+        $currentQtyMap = [];
+        $currentOrderRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty FROM greattree_order_history WHERE order_id = ? GROUP BY product_id", [$orderId]);
+        if ($currentOrderRs) {
+            while (!$currentOrderRs->EOF) {
+                $row = $currentOrderRs->fetchObj();
+                $currentQtyMap[intval($row->product_id)] = intval($row->total_qty);
+                $currentOrderRs->MoveNext();
+            }
+        }
+
+        // 預檢本次異動後的數量
+        foreach ($products as $p) {
+            $pid = intval($p['product_id']);
+            $qtyInput = intval($p['quantity']);
+            $qtyChange = ($transactionType === 'DEDUCT') ? -$qtyInput : $qtyInput;
+
+            $currentQty = isset($currentQtyMap[$pid]) ? $currentQtyMap[$pid] : 0;
+            $newQty = $currentQty + $qtyChange;
+
+            if ($newQty < 0) {
+                throw new Exception("訂單商品扣減數量異常，累計商品數量不可為負數", 11);
+            }
+        }
+
+        // 4. 寫入本次交易紀錄
+        // A. 寫入/更新大樹訂單主檔 (greattree_orders) - 只有在主檔不存在時才 INSERT 一次主檔
+        $checkOrder = $Conn->execute("SELECT 1 FROM greattree_orders WHERE order_id = ? LIMIT 1", [$orderId]);
+        if (!$checkOrder || $checkOrder->RecordCount() == 0) {
+            $insertOrderHeader = $Conn->autoExecute('greattree_orders', [
+                'order_id' => $orderId,
+                'account_id' => $accountId,
+                'order_date' => date('Y-m-d'),
+                'order_time' => date('H:i:s')
+            ], 'INSERT');
+            if (!$insertOrderHeader) {
+                throw new Exception('寫入訂單主檔失敗，原因：' . $Conn->ErrorMsg(), 13);
+            }
+        }
+
+        // B. 寫入本次商品異動明細至歷史明細表 (greattree_order_history)
+        foreach ($products as $p) {
+            $pid = intval($p['product_id']);
+            $qtyInput = intval($p['quantity']);
+            $qty = ($transactionType === 'DEDUCT') ? -$qtyInput : $qtyInput;
+
+            $insertOrderHistory = $Conn->autoExecute('greattree_order_history', [
+                'order_id' => $orderId,
+                'product_id' => $pid,
+                'quantity' => $qty
+            ], 'INSERT');
+
+            if (!$insertOrderHistory) {
+                throw new Exception('寫入訂單明細失敗，原因：' . $Conn->ErrorMsg(), 13);
+            }
+        }
+
+        // 5. 取得該訂單調整後的所有商品歷史最新總量
+        $totalProducts = [];
+        $totalOrderRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty FROM greattree_order_history WHERE order_id = ? GROUP BY product_id", [$orderId]);
+        if ($totalOrderRs) {
+            while (!$totalOrderRs->EOF) {
+                $row = $totalOrderRs->fetchObj();
+                $totalProducts[] = [
+                    'product_id' => intval($row->product_id),
+                    'quantity' => intval($row->total_qty)
+                ];
+                $totalOrderRs->MoveNext();
+            }
+        }
+
+        // 6. 重新計算每項印花活動最新應得總點數
         $now = date('Y-m-d H:i:s');
         $sql = "SELECT id, name, type FROM stamp WHERE is_active = 1 AND start_time <= ? AND end_time >= ?";
         $eventRs = $Conn->execute($sql, [$now, $now]);
 
-        $eventList = [];
+        $newPointsMap = [];
         if ($eventRs && $eventRs->RecordCount() > 0) {
             while (!$eventRs->EOF) {
                 $event = $eventRs->fetchObj();
@@ -115,9 +165,12 @@ class StampPointMapping extends ApiTemplate
                     }
                 }
 
-                foreach ($products as $p) {
-                    $pid = intval($p['product_id']);
-                    $qty = intval($p['quantity']);
+                foreach ($totalProducts as $p) {
+                    $pid = $p['product_id'];
+                    $qty = $p['quantity'];
+                    if ($qty < 0) {
+                        $qty = 0; // 若總數量累計為負數，歸零計算
+                    }
 
                     $isQualified = false;
                     if ($event->type == 'ALL_PRODUCT') {
@@ -129,7 +182,12 @@ class StampPointMapping extends ApiTemplate
                     }
 
                     if ($isQualified) {
-                        $qualifiedAmount += ((isset($priceMap[$pid]) ? $priceMap[$pid] : 0) * $qty);
+                        // 如果 priceMap 找不到該 pid（非本次新增商品，而是資料庫先前明細的商品）
+                        if (!isset($priceMap[$pid])) {
+                            $singlePriceRs = $Conn->execute("SELECT prices FROM product WHERE product_id = ? LIMIT 1", [$pid]);
+                            $priceMap[$pid] = ($singlePriceRs && $singlePriceRs->RecordCount() > 0) ? floatval($singlePriceRs->fetchObj()->prices) : 0;
+                        }
+                        $qualifiedAmount += ($priceMap[$pid] * $qty);
                         $qualifiedQuantity += $qty;
                     }
                 }
@@ -138,8 +196,8 @@ class StampPointMapping extends ApiTemplate
                 $ruleSql = "SELECT threshold_type, threshold_amount, reward_points FROM stamp_rule WHERE event_id = ? ORDER BY threshold_amount DESC";
                 $ruleRs = $Conn->execute($ruleSql, [$event->id]);
 
+                $rewardPoints = 0;
                 if ($ruleRs && $ruleRs->RecordCount() > 0) {
-                    $rewardPoints = 0;
                     while (!$ruleRs->EOF) {
                         $rule = $ruleRs->fetchObj();
                         // 依照模式判斷是否達標：1.滿額(AMOUNT) 2.滿件(QUANTITY)
@@ -156,45 +214,90 @@ class StampPointMapping extends ApiTemplate
                         }
                         $ruleRs->MoveNext();
                     }
-
-                    if ($rewardPoints > 0) {
-                        $eventList[] = [
-                            'event_id' => intval($event->id),
-                            'event_name' => $event->name,
-                            'point' => intval($rewardPoints)
-                        ];
-                    }
                 }
+
+                $newPointsMap[intval($event->id)] = [
+                    'event_id' => intval($event->id),
+                    'event_name' => $event->name,
+                    'points' => intval($rewardPoints)
+                ];
+
                 $eventRs->MoveNext();
             }
         }
 
-        // 6. 寫入資料庫記錄
-        if (!empty($eventList)) {
-            // A. 寫入大樹訂單表 (greattree_orders)
-            foreach ($products as $p) {
-                $Conn->autoExecute('greattree_orders', [
-                    'order_id' => $orderId,
-                    'account_id' => $accountId,
-                    'order_date' => date('Y-m-d'),
-                    'order_time' => date('H:i:s'),
-                    'product_id' => intval($p['product_id']),
-                    'quantity' => intval($p['quantity'])
-                ], 'INSERT');
+        // 7. 查詢該訂單先前已發放的總點數
+        $alreadyAwardedPointsMap = [];
+        $historySql = "SELECT refer_stamp_id as event_id, SUM(point) as total_point FROM point_history WHERE refer_order_id = ? GROUP BY refer_stamp_id";
+        $historyRs = $Conn->execute($historySql, [$orderId]);
+        if ($historyRs) {
+            while (!$historyRs->EOF) {
+                $row = $historyRs->fetchObj();
+                $alreadyAwardedPointsMap[intval($row->event_id)] = intval($row->total_point);
+                $historyRs->MoveNext();
             }
+        }
 
-            // B. 寫入點數歷史 (point_history)
-            foreach ($eventList as $event) {
-                $Conn->autoExecute('point_history', [
+        // 8. 比較並將點數差額寫入點數歷史，並取得本次異動清單
+        $eventList = [];
+
+        // 比對目前活動的點數
+        foreach ($newPointsMap as $eventId => $eventInfo) {
+            $alreadyAwarded = isset($alreadyAwardedPointsMap[$eventId]) ? $alreadyAwardedPointsMap[$eventId] : 0; // 已經回饋的點數
+            $targetPoints = $eventInfo['points'];
+            $delta = $targetPoints - $alreadyAwarded;
+
+            if ($delta != 0) {
+                $insertHistory = $Conn->autoExecute('point_history', [
                     'account_id' => $accountId,
                     'point_type' => 3, // STAMP
-                    'point' => $event['point'],
+                    'point' => $delta,
                     'create_at' => date('Y-m-d H:i:s'),
                     'note' => '',
-                    "refer" => "",
+                    'refer' => '',
                     'refer_order_id' => $orderId,
-                    'refer_stamp_id' => $event['event_id']
+                    'refer_stamp_id' => $eventId
                 ], 'INSERT');
+
+                if (!$insertHistory) {
+                    throw new Exception('寫入點數歷史失敗，原因：' . $Conn->ErrorMsg(), 10);
+                }
+
+                $eventList[] = [
+                    'event_id' => $eventId,
+                    'event_name' => $eventInfo['event_name'],
+                    'point' => $delta
+                ];
+            }
+        }
+
+        // 比對非目前活動（可能已過期或被停用，但先前有發過點數需退回的情況）
+        foreach ($alreadyAwardedPointsMap as $eventId => $alreadyAwarded) {
+            if (!isset($newPointsMap[$eventId]) && $alreadyAwarded != 0) {
+                $eventObj = $Conn->GetRow("SELECT name FROM stamp WHERE id = ?", [$eventId]);
+                $eventName = $eventObj ? $eventObj['name'] : '未知印花活動';
+
+                $delta = -$alreadyAwarded;
+                $insertHistory = $Conn->autoExecute('point_history', [
+                    'account_id' => $accountId,
+                    'point_type' => 3, // STAMP
+                    'point' => $delta,
+                    'create_at' => date('Y-m-d H:i:s'),
+                    'note' => '',
+                    'refer' => '',
+                    'refer_order_id' => $orderId,
+                    'refer_stamp_id' => $eventId
+                ], 'INSERT');
+
+                if (!$insertHistory) {
+                    throw new Exception('寫入點數歷史失敗，原因：' . $Conn->ErrorMsg(), 10);
+                }
+
+                $eventList[] = [
+                    'event_id' => $eventId,
+                    'event_name' => $eventName,
+                    'point' => $delta
+                ];
             }
         }
 
