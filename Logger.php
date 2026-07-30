@@ -10,9 +10,10 @@ class Logger
      */
     public static function log($message, $level = 'ERROR')
     {
-        $logDir = __DIR__ . '/../logs/' . date('Y-m');
+        // 移至根目錄後，直接使用 __DIR__ . '/logs' 即可
+        $logDir = __DIR__ . '/logs/' . date('Y-m');
 
-        // 如果目錄不存在則自動建立
+        // 如果目錄不存在則建立
         if (!is_dir($logDir)) {
             mkdir($logDir, 0777, true);
         }
