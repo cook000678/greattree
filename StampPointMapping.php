@@ -5,6 +5,7 @@ class StampPointMapping extends ApiTemplate
 {
     protected function execute()
     {
+        date_default_timezone_set('Asia/Taipei');
         $DB = new DB();
         $Conn = $DB->getConnection();
 
@@ -16,7 +17,7 @@ class StampPointMapping extends ApiTemplate
 
         // 1. 參數驗證
         if (!preg_match('/^[a-zA-Z0-9]{1,20}$/', $accountId)) {
-            throw new Exception('account_id參數異常只限英文和數字共20碼', 1);
+            throw new Exception('account_id參數異常僅限英文和數字共20碼', 1);
         }
 
         if (!in_array($transactionType, ['ADD', 'DEDUCT'])) {
@@ -33,20 +34,31 @@ class StampPointMapping extends ApiTemplate
             throw new Exception("帳號不存在", 2);
         }
 
-        // 3. 讀取商品價格與格式檢查
-        $productIds = [];
+        // 3. 先取當前訂單已有的商品總量
+        $currentQtyMap = [];
+        $currentOrderRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty FROM greattree_order_history WHERE order_id = ? GROUP BY product_id", [$orderId]);
+        if ($currentOrderRs) {
+            while (!$currentOrderRs->EOF) {
+                $row = $currentOrderRs->fetchObj();
+                $currentQtyMap[intval($row->product_id)] = intval($row->total_qty);
+                $currentOrderRs->MoveNext();
+            }
+        }
+
+        // 3.2. 收集所有需要查詢價格的商品 ID (包括傳入的商品 + 訂單已有的歷史商品，一次性載入，防 N+1 次 SQL 查詢)
+        $allProductIds = array_keys($currentQtyMap);
         foreach ($products as $p) {
             $pid = intval(isset($p['product_id']) ? $p['product_id'] : 0);
             if ($pid > 0) {
-                $productIds[] = $pid;
+                $allProductIds[] = $pid;
             }
         }
-        $productIds = array_unique($productIds);
+        $allProductIds = array_unique($allProductIds);
 
         $priceMap = [];
-        if (!empty($productIds)) {
-            $placeholders = implode(',', array_fill(0, count($productIds), '?'));
-            $priceRs = $Conn->execute("SELECT product_id, prices FROM product WHERE product_id IN ($placeholders)", $productIds);
+        if (!empty($allProductIds)) {
+            $placeholders = implode(',', array_fill(0, count($allProductIds), '?'));
+            $priceRs = $Conn->execute("SELECT product_id, prices FROM product WHERE product_id IN ($placeholders)", $allProductIds);
             if ($priceRs) {
                 while (!$priceRs->EOF) {
                     $pObj = $priceRs->fetchObj();
@@ -56,6 +68,7 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
+        // 3.3. 檢查傳入商品的欄位格式與是否存在
         foreach ($products as $p) {
             $pid = intval(isset($p['product_id']) ? $p['product_id'] : 0);
             $qty = intval(isset($p['quantity']) ? $p['quantity'] : 0);
@@ -70,21 +83,19 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 3.5. 先行撈取當前訂單的商品累積總量，進行安全比對驗證 (改查歷史明細表 greattree_order_history)
-        $currentQtyMap = [];
-        $currentOrderRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty FROM greattree_order_history WHERE order_id = ? GROUP BY product_id", [$orderId]);
-        if ($currentOrderRs) {
-            while (!$currentOrderRs->EOF) {
-                $row = $currentOrderRs->fetchObj();
-                $currentQtyMap[intval($row->product_id)] = intval($row->total_qty);
-                $currentOrderRs->MoveNext();
-            }
-        }
-
-        // 預檢本次異動後的數量
+        // 3.4. 將API傳入有重複的品號數量加總
+        $inputQtyMap = [];
         foreach ($products as $p) {
             $pid = intval($p['product_id']);
-            $qtyInput = intval($p['quantity']);
+            $qty = intval($p['quantity']);
+            if (!isset($inputQtyMap[$pid])) {
+                $inputQtyMap[$pid] = 0;
+            }
+            $inputQtyMap[$pid] += $qty;
+        }
+
+        // 3.5 將API傳入的數量和資料表比對，若小於0則拋錯
+        foreach ($inputQtyMap as $pid => $qtyInput) {
             $qtyChange = ($transactionType === 'DEDUCT') ? -$qtyInput : $qtyInput;
 
             $currentQty = isset($currentQtyMap[$pid]) ? $currentQtyMap[$pid] : 0;
@@ -106,7 +117,8 @@ class StampPointMapping extends ApiTemplate
                 'order_time' => date('H:i:s')
             ], 'INSERT');
             if (!$insertOrderHeader) {
-                throw new Exception('寫入訂單主檔失敗，原因：' . $Conn->ErrorMsg(), 13);
+                Logger::log("寫入訂單主檔失敗，SQL錯誤: " . $Conn->ErrorMsg(), "ERROR");
+                throw new Exception('寫入訂單主檔失敗', 13);
             }
         }
 
@@ -123,7 +135,8 @@ class StampPointMapping extends ApiTemplate
             ], 'INSERT');
 
             if (!$insertOrderHistory) {
-                throw new Exception('寫入訂單明細失敗，原因：' . $Conn->ErrorMsg(), 13);
+                Logger::log("寫入訂單明細失敗，SQL錯誤: " . $Conn->ErrorMsg(), "ERROR");
+                throw new Exception('寫入訂單明細失敗', 14);
             }
         }
 
@@ -140,93 +153,7 @@ class StampPointMapping extends ApiTemplate
                 $totalOrderRs->MoveNext();
             }
         }
-
-        // 6. 重新計算每項印花活動最新應得總點數
-        $now = date('Y-m-d H:i:s');
-        $sql = "SELECT id, name, type FROM stamp WHERE is_active = 1 AND start_time <= ? AND end_time >= ?";
-        $eventRs = $Conn->execute($sql, [$now, $now]);
-
-        $newPointsMap = [];
-        if ($eventRs && $eventRs->RecordCount() > 0) {
-            while (!$eventRs->EOF) {
-                $event = $eventRs->fetchObj();
-                $qualifiedAmount = 0;
-                $qualifiedQuantity = 0;
-
-                // 先找出該活動的所有符合商品 ids (如果是 SPECIFIC_PRODUCT)
-                $specificProductIds = [];
-                if ($event->type == 'SPECIFIC_PRODUCT') {
-                    $spRs = $Conn->execute("SELECT product_id FROM stamp_product WHERE event_id = ?", [$event->id]);
-                    if ($spRs) {
-                        while (!$spRs->EOF) {
-                            $specificProductIds[] = intval($spRs->fetchObj()->product_id);
-                            $spRs->MoveNext();
-                        }
-                    }
-                }
-
-                foreach ($totalProducts as $p) {
-                    $pid = $p['product_id'];
-                    $qty = $p['quantity'];
-                    if ($qty < 0) {
-                        $qty = 0; // 若總數量累計為負數，歸零計算
-                    }
-
-                    $isQualified = false;
-                    if ($event->type == 'ALL_PRODUCT') {
-                        $isQualified = true;
-                    } else if ($event->type == 'SPECIFIC_PRODUCT') {
-                        if (in_array($pid, $specificProductIds)) {
-                            $isQualified = true;
-                        }
-                    }
-
-                    if ($isQualified) {
-                        // 如果 priceMap 找不到該 pid（非本次新增商品，而是資料庫先前明細的商品）
-                        if (!isset($priceMap[$pid])) {
-                            $singlePriceRs = $Conn->execute("SELECT prices FROM product WHERE product_id = ? LIMIT 1", [$pid]);
-                            $priceMap[$pid] = ($singlePriceRs && $singlePriceRs->RecordCount() > 0) ? floatval($singlePriceRs->fetchObj()->prices) : 0;
-                        }
-                        $qualifiedAmount += ($priceMap[$pid] * $qty);
-                        $qualifiedQuantity += $qty;
-                    }
-                }
-
-                // 取得規則，並依門檻金額由高到低排序，以利找出符合的最高門檻
-                $ruleSql = "SELECT threshold_type, threshold_amount, reward_points FROM stamp_rule WHERE event_id = ? ORDER BY threshold_amount DESC";
-                $ruleRs = $Conn->execute($ruleSql, [$event->id]);
-
-                $rewardPoints = 0;
-                if ($ruleRs && $ruleRs->RecordCount() > 0) {
-                    while (!$ruleRs->EOF) {
-                        $rule = $ruleRs->fetchObj();
-                        // 依照模式判斷是否達標：1.滿額(AMOUNT) 2.滿件(QUANTITY)
-                        if ($rule->threshold_type == 'AMOUNT') {
-                            if ($qualifiedAmount >= $rule->threshold_amount) {
-                                $rewardPoints = $rule->reward_points;
-                                break;
-                            }
-                        } else if ($rule->threshold_type == 'QUANTITY') {
-                            if ($qualifiedQuantity >= $rule->threshold_amount) {
-                                $rewardPoints = $rule->reward_points;
-                                break;
-                            }
-                        }
-                        $ruleRs->MoveNext();
-                    }
-                }
-
-                $newPointsMap[intval($event->id)] = [
-                    'event_id' => intval($event->id),
-                    'event_name' => $event->name,
-                    'points' => intval($rewardPoints)
-                ];
-
-                $eventRs->MoveNext();
-            }
-        }
-
-        // 7. 查詢該訂單先前已發放的總點數
+        // 6. 查詢該訂單先前已發放的總點數
         $alreadyAwardedPointsMap = [];
         $historySql = "SELECT refer_stamp_id as event_id, SUM(point) as total_point FROM point_history WHERE refer_order_id = ? GROUP BY refer_stamp_id";
         $historyRs = $Conn->execute($historySql, [$orderId]);
@@ -235,6 +162,104 @@ class StampPointMapping extends ApiTemplate
                 $row = $historyRs->fetchObj();
                 $alreadyAwardedPointsMap[intval($row->event_id)] = intval($row->total_point);
                 $historyRs->MoveNext();
+            }
+        }
+
+        // 7. 重新計算每項印花活動最新應得總點數
+        $now = date('Y-m-d H:i:s');
+
+        // 收集所有需要比對的活動 ID：包含目前的活動 + 先前此訂單拿過點數的活動
+        // 第六點是因為，可能退貨時活動已過期，使用第七點會取不到所以才要使用第六點
+        $activeEventIds = [];
+        $activeEventRs = $Conn->execute("SELECT id FROM stamp WHERE is_active = 1 AND start_time <= ? AND end_time >= ?", [$now, $now]);
+        if ($activeEventRs) {
+            while (!$activeEventRs->EOF) {
+                $activeEventIds[] = intval($activeEventRs->fetchObj()->id);
+                $activeEventRs->MoveNext();
+            }
+        }
+        $alreadyAwardedEventIds = array_keys($alreadyAwardedPointsMap);
+        $allEventIds = array_unique(array_merge($activeEventIds, $alreadyAwardedEventIds));
+
+        $newPointsMap = [];
+        if (!empty($allEventIds)) {
+            $placeholders = implode(',', array_fill(0, count($allEventIds), '?'));
+            $eventRs = $Conn->execute("SELECT id, name, type FROM stamp WHERE id IN ($placeholders)", $allEventIds);
+
+            if ($eventRs && $eventRs->RecordCount() > 0) {
+                while (!$eventRs->EOF) {
+                    $event = $eventRs->fetchObj();
+                    $qualifiedAmount = 0;
+                    $qualifiedQuantity = 0;
+
+                    // 先找出該活動的所有符合商品 ids (如果是 SPECIFIC_PRODUCT)
+                    $specificProductIds = [];
+                    if ($event->type == 'SPECIFIC_PRODUCT') {
+                        $spRs = $Conn->execute("SELECT product_id FROM stamp_product WHERE event_id = ?", [$event->id]);
+                        if ($spRs) {
+                            while (!$spRs->EOF) {
+                                $specificProductIds[] = intval($spRs->fetchObj()->product_id);
+                                $spRs->MoveNext();
+                            }
+                        }
+                    }
+
+                    foreach ($totalProducts as $p) {
+                        $pid = $p['product_id'];
+                        $qty = $p['quantity'];
+                        // 不太會進到這裡，因為3.5已經將小於0的拋出錯誤
+                        if ($qty < 0) {
+                            $qty = 0; // 若總數量累計為負數，歸零計算
+                        }
+
+                        $isQualified = false;
+                        if ($event->type == 'ALL_PRODUCT') {
+                            $isQualified = true;
+                        } else if ($event->type == 'SPECIFIC_PRODUCT') {
+                            if (in_array($pid, $specificProductIds)) {
+                                $isQualified = true;
+                            }
+                        }
+
+                        if ($isQualified) {
+                            $price = isset($priceMap[$pid]) ? $priceMap[$pid] : 0;
+                            $qualifiedAmount += ($price * $qty);
+                            $qualifiedQuantity += $qty;
+                        }
+                    }
+
+                    // 取得規則，並依門檻金額由高到低排序，以利找出符合的最高門檻
+                    $ruleSql = "SELECT threshold_type, threshold_amount, reward_points FROM stamp_rule WHERE event_id = ? ORDER BY threshold_amount DESC";
+                    $ruleRs = $Conn->execute($ruleSql, [$event->id]);
+
+                    $rewardPoints = 0;
+                    if ($ruleRs && $ruleRs->RecordCount() > 0) {
+                        while (!$ruleRs->EOF) {
+                            $rule = $ruleRs->fetchObj();
+                            // 依照模式判斷是否達標：1.滿額(AMOUNT) 2.滿件(QUANTITY)
+                            if ($rule->threshold_type == 'AMOUNT') {
+                                if ($qualifiedAmount >= $rule->threshold_amount) {
+                                    $rewardPoints = $rule->reward_points;
+                                    break;
+                                }
+                            } else if ($rule->threshold_type == 'QUANTITY') {
+                                if ($qualifiedQuantity >= $rule->threshold_amount) {
+                                    $rewardPoints = $rule->reward_points;
+                                    break;
+                                }
+                            }
+                            $ruleRs->MoveNext();
+                        }
+                    }
+
+                    $newPointsMap[intval($event->id)] = [
+                        'event_id' => intval($event->id),
+                        'event_name' => $event->name,
+                        'points' => intval($rewardPoints)
+                    ];
+
+                    $eventRs->MoveNext();
+                }
             }
         }
 
@@ -252,7 +277,6 @@ class StampPointMapping extends ApiTemplate
                     'account_id' => $accountId,
                     'point_type' => 3, // STAMP
                     'point' => $delta,
-                    'create_at' => date('Y-m-d H:i:s'),
                     'note' => '',
                     'refer' => '',
                     'refer_order_id' => $orderId,
@@ -260,7 +284,8 @@ class StampPointMapping extends ApiTemplate
                 ], 'INSERT');
 
                 if (!$insertHistory) {
-                    throw new Exception('寫入點數歷史失敗，原因：' . $Conn->ErrorMsg(), 10);
+                    Logger::log("差額寫入點數歷史失敗，SQL錯誤: " . $Conn->ErrorMsg(), "ERROR");
+                    throw new Exception('差額寫入點數歷史失敗', 10);
                 }
 
                 $eventList[] = [
@@ -282,7 +307,6 @@ class StampPointMapping extends ApiTemplate
                     'account_id' => $accountId,
                     'point_type' => 3, // STAMP
                     'point' => $delta,
-                    'create_at' => date('Y-m-d H:i:s'),
                     'note' => '',
                     'refer' => '',
                     'refer_order_id' => $orderId,
@@ -290,7 +314,8 @@ class StampPointMapping extends ApiTemplate
                 ], 'INSERT');
 
                 if (!$insertHistory) {
-                    throw new Exception('寫入點數歷史失敗，原因：' . $Conn->ErrorMsg(), 10);
+                    Logger::log("過期活動點數寫入點數歷史失敗，SQL錯誤: " . $Conn->ErrorMsg(), "ERROR");
+                    throw new Exception('過期活動點數寫入點數歷史失敗', 15);
                 }
 
                 $eventList[] = [
