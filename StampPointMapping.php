@@ -35,7 +35,7 @@ class StampPointMapping extends ApiTemplate
             throw new Exception("帳號不存在", 2);
         }
 
-        // 3. 先取當前訂單已有的商品總量
+        // 3. 取當前訂單的商品總量
         $currentQtyMap = [];
         $currentOrderRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty FROM greattree_order_history WHERE order_id = ? GROUP BY product_id", [$orderId]);
         if ($currentOrderRs) {
@@ -46,7 +46,7 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 3.2. 收集所有需要查詢價格的商品 ID (包括傳入的商品 + 訂單已有的歷史商品，一次性載入，防 N+1 次 SQL 查詢)
+        // 3.2. 收集所有需要查詢價格的商品 ID
         $allProductIds = array_keys($currentQtyMap);
         foreach ($products as $p) {
             $pid = intval(isset($p['product_id']) ? $p['product_id'] : 0);
@@ -193,7 +193,7 @@ class StampPointMapping extends ApiTemplate
                     $qualifiedAmount = 0;
                     $qualifiedQuantity = 0;
 
-                    // 先找出該活動的所有符合商品 ids (如果是 SPECIFIC_PRODUCT)
+                    // 先找出該活動的所有符合商品 id (如果是 SPECIFIC_PRODUCT)
                     $specificProductIds = [];
                     if ($event->type == 'SPECIFIC_PRODUCT') {
                         $spRs = $Conn->execute("SELECT product_id FROM stamp_product WHERE event_id = ?", [$event->id]);
@@ -271,13 +271,18 @@ class StampPointMapping extends ApiTemplate
         foreach ($newPointsMap as $eventId => $eventInfo) {
             $alreadyAwarded = isset($alreadyAwardedPointsMap[$eventId]) ? $alreadyAwardedPointsMap[$eventId] : 0; // 已經回饋的點數
             $targetPoints = $eventInfo['points'];
-            $delta = $targetPoints - $alreadyAwarded;
+            $diffPoint = $targetPoints - $alreadyAwarded;
 
-            if ($delta != 0) {
+            // 限制已過期活動（不在目前有效活動 activeEventIds 中）僅能退回點數，不可追加
+            if (!in_array($eventId, $activeEventIds) && $diffPoint > 0) {
+                $diffPoint = 0;
+            }
+
+            if ($diffPoint != 0) {
                 $insertHistory = $Conn->autoExecute('point_history', [
                     'account_id' => $accountId,
                     'point_type' => 3, // STAMP
-                    'point' => $delta,
+                    'point' => $diffPoint,
                     'note' => '',
                     'refer' => '',
                     'refer_order_id' => $orderId,
@@ -292,7 +297,7 @@ class StampPointMapping extends ApiTemplate
                 $eventList[] = [
                     'event_id' => $eventId,
                     'event_name' => $eventInfo['event_name'],
-                    'point' => $delta
+                    'point' => $diffPoint
                 ];
             }
         }
@@ -303,11 +308,11 @@ class StampPointMapping extends ApiTemplate
                 $eventObj = $Conn->GetRow("SELECT name FROM stamp WHERE id = ?", [$eventId]);
                 $eventName = $eventObj ? $eventObj['name'] : '未知印花活動';
 
-                $delta = -$alreadyAwarded;
+                $diffPoint = -$alreadyAwarded;
                 $insertHistory = $Conn->autoExecute('point_history', [
                     'account_id' => $accountId,
                     'point_type' => 3, // STAMP
-                    'point' => $delta,
+                    'point' => $diffPoint,
                     'note' => '',
                     'refer' => '',
                     'refer_order_id' => $orderId,
@@ -322,7 +327,7 @@ class StampPointMapping extends ApiTemplate
                 $eventList[] = [
                     'event_id' => $eventId,
                     'event_name' => $eventName,
-                    'point' => $delta
+                    'point' => $diffPoint
                 ];
             }
         }
