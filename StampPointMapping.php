@@ -293,20 +293,16 @@ class StampPointMapping extends ApiTemplate
                     Logger::log("差額寫入點數歷史失敗，SQL錯誤: " . $Conn->ErrorMsg(), "ERROR");
                     throw new Exception('差額寫入點數歷史失敗', 10);
                 }
-
-                $eventList[] = [
-                    'event_id' => $eventId,
-                    'event_name' => $eventInfo['event_name'],
-                    'point' => $diffPoint
-                ];
             }
         }
 
         // 比對非目前活動（可能已過期或被停用，但先前有發過點數需退回的情況）
         foreach ($alreadyAwardedPointsMap as $eventId => $alreadyAwarded) {
             if (!isset($newPointsMap[$eventId]) && $alreadyAwarded != 0) {
-                $eventObj = $Conn->GetRow("SELECT name FROM stamp WHERE id = ?", [$eventId]);
-                $eventName = $eventObj ? $eventObj['name'] : '未知印花活動';
+                // 若是 ADD 交易，且活動已從資料庫中完全刪除，不可在此時將先前的點數歸零
+                if ($transactionType === 'ADD') {
+                    continue;
+                }
 
                 $diffPoint = -$alreadyAwarded;
                 $insertHistory = $Conn->autoExecute('point_history', [
@@ -323,12 +319,24 @@ class StampPointMapping extends ApiTemplate
                     Logger::log("過期活動點數寫入點數歷史失敗，SQL錯誤: " . $Conn->ErrorMsg(), "ERROR");
                     throw new Exception('過期活動點數寫入點數歷史失敗', 15);
                 }
+            }
+        }
 
-                $eventList[] = [
-                    'event_id' => $eventId,
-                    'event_name' => $eventName,
-                    'point' => $diffPoint
-                ];
+        // 返回改為該筆訂單所有的印花點數，event_list 裡面同一個活動只會有一筆
+        $eventListSql = "SELECT SUM(ph.point) AS point, ph.refer_stamp_id, s.name FROM point_history AS ph LEFT JOIN stamp AS s ON ph.refer_stamp_id = s.id WHERE ph.refer_order_id = ? AND ph.point_type = 3 GROUP BY ph.refer_stamp_id, s.name";
+        $eventListRs = $Conn->execute($eventListSql, [$orderId]);
+        if ($eventListRs && $eventListRs->RecordCount() > 0) {
+            while (!$eventListRs->EOF) {
+                $row = $eventListRs->fetchObj();
+                $pointSum = intval($row->point);
+                if ($pointSum > 0) {
+                    $eventList[] = [
+                        'event_id' => intval($row->refer_stamp_id),
+                        'event_name' => $row->name ? $row->name : '未知印花活動',
+                        'point' => $pointSum
+                    ];
+                }
+                $eventListRs->MoveNext();
             }
         }
 
