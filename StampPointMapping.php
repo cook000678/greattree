@@ -39,9 +39,15 @@ class StampPointMapping extends ApiTemplate
             throw new Exception("帳號不存在", 2);
         }
 
+        // 2.2檢查訂單若已存在，與傳入的account_id是否一致
+        $existingOrder = $Conn->GetRow("SELECT account_id FROM greattree_orders WHERE order_id = ?", [$orderId]);
+        if ($existingOrder && $existingOrder['account_id'] !== $accountId) {
+            throw new Exception("訂單所屬帳號與傳入帳號不一致", 17);
+        }
+
         // 3. 取當前訂單的商品總量
         $currentQtyMap = [];
-        $currentOrderRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty FROM greattree_order_history WHERE order_id = ? AND account_id = ? GROUP BY product_id", [$orderId, $accountId]);
+        $currentOrderRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty FROM greattree_order_history WHERE order_id = ? GROUP BY product_id", [$orderId]);
         if ($currentOrderRs) {
             while (!$currentOrderRs->EOF) {
                 $row = $currentOrderRs->fetchObj();
@@ -135,7 +141,6 @@ class StampPointMapping extends ApiTemplate
 
             $insertOrderHistory = $Conn->autoExecute('greattree_order_history', [
                 'order_id' => $orderId,
-                'account_id' => $accountId,
                 'product_id' => $pid,
                 'quantity' => $qty
             ], 'INSERT');
@@ -148,7 +153,7 @@ class StampPointMapping extends ApiTemplate
 
         // 5. 取得該訂單調整後的所有商品歷史最新總量
         $totalProducts = [];
-        $totalOrderRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty FROM greattree_order_history WHERE order_id = ? AND account_id = ? GROUP BY product_id", [$orderId, $accountId]);
+        $totalOrderRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty FROM greattree_order_history WHERE order_id = ? GROUP BY product_id", [$orderId]);
         if ($totalOrderRs) {
             while (!$totalOrderRs->EOF) {
                 $row = $totalOrderRs->fetchObj();
