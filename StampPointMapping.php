@@ -21,6 +21,10 @@ class StampPointMapping extends ApiTemplate
             throw new Exception('account_id參數異常僅限英文和數字共20碼', 1);
         }
 
+        if (!preg_match('/^[a-zA-Z0-9_-]{1,30}$/', $orderId)) {
+            throw new Exception('order_no參數異常僅限英文、數字、底線與減號共30碼', 16);
+        }
+
         if (!in_array($transactionType, ['ADD', 'DEDUCT'])) {
             throw new Exception('transaction_type參數異常，僅限ADD或DEDUCT', 12);
         }
@@ -37,7 +41,7 @@ class StampPointMapping extends ApiTemplate
 
         // 3. 取當前訂單的商品總量
         $currentQtyMap = [];
-        $currentOrderRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty FROM greattree_order_history WHERE order_id = ? GROUP BY product_id", [$orderId]);
+        $currentOrderRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty FROM greattree_order_history WHERE order_id = ? AND account_id = ? GROUP BY product_id", [$orderId, $accountId]);
         if ($currentOrderRs) {
             while (!$currentOrderRs->EOF) {
                 $row = $currentOrderRs->fetchObj();
@@ -109,7 +113,7 @@ class StampPointMapping extends ApiTemplate
 
         // 4. 寫入本次交易紀錄
         // A. 寫入/更新大樹訂單主檔 (greattree_orders) - 只有在主檔不存在時才 INSERT 一次主檔
-        $checkOrder = $Conn->execute("SELECT 1 FROM greattree_orders WHERE order_id = ? LIMIT 1", [$orderId]);
+        $checkOrder = $Conn->execute("SELECT 1 FROM greattree_orders WHERE order_id = ? AND account_id = ? LIMIT 1", [$orderId, $accountId]);
         if (!$checkOrder || $checkOrder->RecordCount() == 0) {
             $insertOrderHeader = $Conn->autoExecute('greattree_orders', [
                 'order_id' => $orderId,
@@ -131,6 +135,7 @@ class StampPointMapping extends ApiTemplate
 
             $insertOrderHistory = $Conn->autoExecute('greattree_order_history', [
                 'order_id' => $orderId,
+                'account_id' => $accountId,
                 'product_id' => $pid,
                 'quantity' => $qty
             ], 'INSERT');
@@ -143,7 +148,7 @@ class StampPointMapping extends ApiTemplate
 
         // 5. 取得該訂單調整後的所有商品歷史最新總量
         $totalProducts = [];
-        $totalOrderRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty FROM greattree_order_history WHERE order_id = ? GROUP BY product_id", [$orderId]);
+        $totalOrderRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty FROM greattree_order_history WHERE order_id = ? AND account_id = ? GROUP BY product_id", [$orderId, $accountId]);
         if ($totalOrderRs) {
             while (!$totalOrderRs->EOF) {
                 $row = $totalOrderRs->fetchObj();
@@ -156,8 +161,8 @@ class StampPointMapping extends ApiTemplate
         }
         // 6. 查詢該訂單先前已發放的總點數
         $alreadyAwardedPointsMap = [];
-        $historySql = "SELECT refer_stamp_id as event_id, SUM(point) as total_point FROM point_history WHERE refer_order_id = ? GROUP BY refer_stamp_id";
-        $historyRs = $Conn->execute($historySql, [$orderId]);
+        $historySql = "SELECT refer_stamp_id as event_id, SUM(point) as total_point FROM point_history WHERE refer_order_id = ? AND account_id = ? GROUP BY refer_stamp_id";
+        $historyRs = $Conn->execute($historySql, [$orderId, $accountId]);
         if ($historyRs) {
             while (!$historyRs->EOF) {
                 $row = $historyRs->fetchObj();
@@ -283,7 +288,7 @@ class StampPointMapping extends ApiTemplate
                     'account_id' => $accountId,
                     'point_type' => 3, // STAMP
                     'point' => $diffPoint,
-                    'note' => '',
+                    'note' => ($transactionType === 'DEDUCT') ? '退貨' : "",
                     'refer' => '',
                     'refer_order_id' => $orderId,
                     'refer_stamp_id' => $eventId
@@ -309,7 +314,7 @@ class StampPointMapping extends ApiTemplate
                     'account_id' => $accountId,
                     'point_type' => 3, // STAMP
                     'point' => $diffPoint,
-                    'note' => '',
+                    'note' => ($transactionType === 'DEDUCT') ? '退貨' : "",
                     'refer' => '',
                     'refer_order_id' => $orderId,
                     'refer_stamp_id' => $eventId
@@ -323,8 +328,8 @@ class StampPointMapping extends ApiTemplate
         }
 
         // 返回改為該筆訂單所有的印花點數，event_list 裡面同一個活動只會有一筆
-        $eventListSql = "SELECT SUM(ph.point) AS point, ph.refer_stamp_id, s.name FROM point_history AS ph LEFT JOIN stamp AS s ON ph.refer_stamp_id = s.id WHERE ph.refer_order_id = ? AND ph.point_type = 3 GROUP BY ph.refer_stamp_id, s.name";
-        $eventListRs = $Conn->execute($eventListSql, [$orderId]);
+        $eventListSql = "SELECT SUM(ph.point) AS point, ph.refer_stamp_id, s.name FROM point_history AS ph LEFT JOIN stamp AS s ON ph.refer_stamp_id = s.id WHERE ph.refer_order_id = ? AND ph.point_type = 3 AND ph.account_id = ? GROUP BY ph.refer_stamp_id, s.name";
+        $eventListRs = $Conn->execute($eventListSql, [$orderId, $accountId]);
         if ($eventListRs && $eventListRs->RecordCount() > 0) {
             while (!$eventListRs->EOF) {
                 $row = $eventListRs->fetchObj();
