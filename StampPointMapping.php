@@ -1,6 +1,5 @@
 <?php
 require_once 'autoload.php';
-require_once 'Logger.php';
 
 class StampPointMapping extends ApiTemplate
 {
@@ -128,7 +127,6 @@ class StampPointMapping extends ApiTemplate
                 'order_time' => date('H:i:s')
             ], 'INSERT');
             if (!$insertOrderHeader) {
-                Logger::log("寫入訂單主檔失敗，SQL錯誤: " . $Conn->ErrorMsg(), "ERROR");
                 throw new Exception('寫入訂單主檔失敗', 13);
             }
         }
@@ -146,7 +144,6 @@ class StampPointMapping extends ApiTemplate
             ], 'INSERT');
 
             if (!$insertOrderHistory) {
-                Logger::log("寫入訂單明細失敗，SQL錯誤: " . $Conn->ErrorMsg(), "ERROR");
                 throw new Exception('寫入訂單明細失敗', 14);
             }
         }
@@ -300,7 +297,6 @@ class StampPointMapping extends ApiTemplate
                 ], 'INSERT');
 
                 if (!$insertHistory) {
-                    Logger::log("差額寫入點數歷史失敗，SQL錯誤: " . $Conn->ErrorMsg(), "ERROR");
                     throw new Exception('差額寫入點數歷史失敗', 10);
                 }
             }
@@ -326,7 +322,6 @@ class StampPointMapping extends ApiTemplate
                 ], 'INSERT');
 
                 if (!$insertHistory) {
-                    Logger::log("過期活動點數寫入點數歷史失敗，SQL錯誤: " . $Conn->ErrorMsg(), "ERROR");
                     throw new Exception('過期活動點數寫入點數歷史失敗', 15);
                 }
             }
