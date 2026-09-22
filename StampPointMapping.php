@@ -13,7 +13,8 @@ class StampPointMapping extends ApiTemplate
         $accountId = isset($input['account_id']) ? $input['account_id'] : '';
         $orderId = isset($input['order_no']) ? $input['order_no'] : '';
         $products = isset($input['products']) ? $input['products'] : [];
-        $transactionType = isset($input['transaction_type']) ? $input['transaction_type'] : '';
+        $transactionType = isset($input['transaction_type']) ? $input['transaction_type'] : ''; // (ADD / DEDUCT)
+        $refer = isset($input['refer']) ? $input['refer'] : ''; // (線上 / 門市)
 
         // 1. 參數驗證
         if (!preg_match('/^[a-zA-Z0-9]{1,20}$/', $accountId)) {
@@ -30,6 +31,10 @@ class StampPointMapping extends ApiTemplate
 
         if (empty($products) || !is_array($products)) {
             throw new Exception('商品格式異常', 7);
+        }
+
+        if ($refer != "門市" && $refer != "線上") {
+            throw new Exception('refer參數異常，僅限門市或線上', 18);
         }
 
         // 2. 檢查帳號是否存在
@@ -55,56 +60,83 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 3.2. 收集所有需要查詢價格的商品 ID
-        $allProductIds = array_keys($currentQtyMap);
+        // 3.2. 驗證傳入商品的 sku_id 與 quantity 格式
+        $inputSkuIds = [];
         foreach ($products as $p) {
-            $pid = intval(isset($p['product_id']) ? $p['product_id'] : 0);
-            if ($pid > 0) {
-                $allProductIds[] = $pid;
-            }
-        }
-        $allProductIds = array_unique($allProductIds);
+            $skuId = isset($p['sku_id']) ? trim(strval($p['sku_id'])) : '';
+            $qty = isset($p['quantity']) ? intval($p['quantity']) : 0;
 
-        $priceMap = [];
-        if (!empty($allProductIds)) {
-            $placeholders = implode(',', array_fill(0, count($allProductIds), '?'));
-            $priceRs = $Conn->execute("SELECT product_id, prices FROM product WHERE product_id IN ($placeholders)", $allProductIds);
-            if ($priceRs) {
-                while (!$priceRs->EOF) {
-                    $pObj = $priceRs->fetchObj();
-                    $priceMap[intval($pObj->product_id)] = floatval($pObj->prices);
-                    $priceRs->MoveNext();
-                }
-            }
-        }
-
-        // 3.3. 檢查傳入商品的欄位格式與是否存在
-        foreach ($products as $p) {
-            $pid = intval(isset($p['product_id']) ? $p['product_id'] : 0);
-            $qty = intval(isset($p['quantity']) ? $p['quantity'] : 0);
-            if ($pid <= 0) {
-                throw new Exception("商品編號格式異常或未提供", 3);
+            if ($skuId === '') {
+                throw new Exception("sku_id格式異常或未提供", 3);
             }
             if ($qty <= 0) {
                 throw new Exception("商品數量格式異常或未提供", 4);
             }
-            if (!isset($priceMap[$pid])) {
-                throw new Exception("商品編號不存在: " . $pid, 5);
+
+            $inputSkuIds[] = $skuId;
+        }
+        $inputSkuIds = array_unique($inputSkuIds);
+
+        // 3.3. 透過 sku_id 查詢 product 資料表
+        $skuToProductMap = [];
+        $priceMap = [];
+
+        if (!empty($inputSkuIds)) {
+            $skuPlaceholders = implode(',', array_fill(0, count($inputSkuIds), '?'));
+            $productRs = $Conn->execute("SELECT product_id, sku_id, prices FROM product WHERE sku_id IN ($skuPlaceholders)", $inputSkuIds);
+            if ($productRs) {
+                while (!$productRs->EOF) {
+                    $pObj = $productRs->fetchObj();
+                    $pid = intval($pObj->product_id);
+                    $skuToProductMap[strval($pObj->sku_id)] = $pid;
+                    $priceMap[$pid] = intval($pObj->prices);
+                    $productRs->MoveNext();
+                }
             }
         }
 
-        // 3.4. 將API傳入有重複的品號數量加總
+        // 3.4. 檢查傳入的 sku_id 是否都在資料庫中存在
+        foreach ($products as $p) {
+            $skuId = trim(strval($p['sku_id']));
+            if (!isset($skuToProductMap[$skuId])) {
+                throw new Exception("sku_id不存在: " . $skuId, 5);
+            }
+        }
+
+        // 3.5. 補查歷史訂單既有商品的價格，避免部分退貨時漏算未退商品的金額
+        $existingProductIds = array_keys($currentQtyMap);
+        $missingPriceProductIds = [];
+        foreach ($existingProductIds as $extPid) {
+            if (!isset($priceMap[$extPid])) {
+                $missingPriceProductIds[] = $extPid;
+            }
+        }
+        if (!empty($missingPriceProductIds)) {
+            $extPlaceholders = implode(',', array_fill(0, count($missingPriceProductIds), '?'));
+            $extPriceRs = $Conn->execute("SELECT product_id, prices FROM product WHERE product_id IN ($extPlaceholders)", $missingPriceProductIds);
+            if ($extPriceRs) {
+                while (!$extPriceRs->EOF) {
+                    $pObj = $extPriceRs->fetchObj();
+                    $priceMap[intval($pObj->product_id)] = intval($pObj->prices);
+                    $extPriceRs->MoveNext();
+                }
+            }
+        }
+
+        // 3.6. 將API傳入有重複的商品數量加總（依 product_id 加總）
         $inputQtyMap = [];
         foreach ($products as $p) {
-            $pid = intval($p['product_id']);
+            $skuId = trim(strval($p['sku_id']));
+            $pid = $skuToProductMap[$skuId];
             $qty = intval($p['quantity']);
+
             if (!isset($inputQtyMap[$pid])) {
                 $inputQtyMap[$pid] = 0;
             }
             $inputQtyMap[$pid] += $qty;
         }
 
-        // 3.5 將API傳入的數量和資料表比對，若小於0則拋錯
+        // 3.7. 將API傳入的數量和資料表比對，若小於0則拋錯
         foreach ($inputQtyMap as $pid => $qtyInput) {
             $qtyChange = ($transactionType === 'DEDUCT') ? -$qtyInput : $qtyInput;
 
@@ -133,7 +165,8 @@ class StampPointMapping extends ApiTemplate
 
         // B. 寫入本次商品異動明細至歷史明細表 (greattree_order_history)
         foreach ($products as $p) {
-            $pid = intval($p['product_id']);
+            $skuId = trim(strval($p['sku_id']));
+            $pid = $skuToProductMap[$skuId];
             $qtyInput = intval($p['quantity']);
             $qty = ($transactionType === 'DEDUCT') ? -$qtyInput : $qtyInput;
 
@@ -291,7 +324,7 @@ class StampPointMapping extends ApiTemplate
                     'point_type' => 3, // STAMP
                     'point' => $diffPoint,
                     'note' => ($transactionType === 'DEDUCT') ? '退貨' : "",
-                    'refer' => '',
+                    'refer' => $refer,
                     'refer_order_id' => $orderId,
                     'refer_stamp_id' => $eventId
                 ], 'INSERT');
@@ -316,11 +349,10 @@ class StampPointMapping extends ApiTemplate
                     'point_type' => 3, // STAMP
                     'point' => $diffPoint,
                     'note' => ($transactionType === 'DEDUCT') ? '退貨' : "",
-                    'refer' => '',
+                    'refer' => $refer,
                     'refer_order_id' => $orderId,
                     'refer_stamp_id' => $eventId
                 ], 'INSERT');
-
                 if (!$insertHistory) {
                     throw new Exception('過期活動點數寫入點數歷史失敗', 15);
                 }
