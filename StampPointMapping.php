@@ -279,13 +279,15 @@ class StampPointMapping extends ApiTemplate
                             $rule = $ruleRs->fetchObj();
                             // 依照模式判斷是否達標：1.滿額(AMOUNT) 2.滿件(QUANTITY)
                             if ($rule->threshold_type == 'AMOUNT') {
-                                if ($qualifiedAmount >= $rule->threshold_amount) {
-                                    $rewardPoints = $rule->reward_points;
+                                if ($rule->threshold_amount > 0 && $qualifiedAmount >= $rule->threshold_amount) {
+                                    $multiplier = floor($qualifiedAmount / $rule->threshold_amount);
+                                    $rewardPoints = $multiplier * $rule->reward_points;
                                     break;
                                 }
                             } else if ($rule->threshold_type == 'QUANTITY') {
-                                if ($qualifiedQuantity >= $rule->threshold_amount) {
-                                    $rewardPoints = $rule->reward_points;
+                                if ($rule->threshold_amount > 0 && $qualifiedQuantity >= $rule->threshold_amount) {
+                                    $multiplier = floor($qualifiedQuantity / $rule->threshold_amount);
+                                    $rewardPoints = $multiplier * $rule->reward_points;
                                     break;
                                 }
                             }
