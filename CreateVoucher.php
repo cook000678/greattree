@@ -25,7 +25,7 @@ class CreateVoucher extends ApiTemplate
             throw new Exception('type參數型態異常，僅限TICKET或DELIVERY', 2);
         }
 
-        if (!is_string($voucherName) || strlen($voucherName) > 30 || $voucherName === '') {
+        if (!is_string($voucherName) || mb_strlen($voucherName, 'UTF-8') > 30 || $voucherName === '') {
             throw new Exception('voucher_name參數型態異常，僅限30碼字串', 3);
         }
 
