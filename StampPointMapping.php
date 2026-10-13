@@ -43,10 +43,19 @@ class StampPointMapping extends ApiTemplate
             throw new Exception("帳號不存在", 2);
         }
 
-        // 2.2檢查訂單若已存在，與傳入的account_id是否一致
+        // 2.2檢查訂單若已存在，與傳入的account_id是否一致，且若已存在則不可再做ADD
         $existingOrder = $Conn->GetRow("SELECT account_id FROM greattree_orders WHERE order_id = ?", [$orderId]);
-        if ($existingOrder && $existingOrder['account_id'] !== $accountId) {
-            throw new Exception("訂單所屬帳號與傳入帳號不一致", 17);
+        if ($existingOrder) {
+            if ($existingOrder['account_id'] !== $accountId) {
+                throw new Exception("訂單所屬帳號與傳入帳號不一致", 17);
+            }
+            if ($transactionType === 'ADD') {
+                throw new Exception("訂單編號已存在，不可重複執行新增", 20);
+            }
+        } else {
+            if ($transactionType === 'DEDUCT') {
+                throw new Exception("訂單不存在，無法執行退貨", 21);
+            }
         }
 
         // 3. 取當前訂單的商品總量
@@ -95,12 +104,17 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 3.4. 檢查傳入的 sku_id 是否都在資料庫中存在
+        // 3.4. 忽略不存在的商品，若整筆訂單所有商品都不存在則拋錯 (代碼 19)
+        $validProducts = [];
         foreach ($products as $p) {
             $skuId = trim(strval($p['sku_id']));
-            if (!isset($skuToProductMap[$skuId])) {
-                throw new Exception("sku_id不存在: " . $skuId, 5);
+            if (isset($skuToProductMap[$skuId])) {
+                $validProducts[] = $p;
             }
+        }
+
+        if (empty($validProducts)) {
+            throw new Exception("整筆訂單所有商品都不存在", 19);
         }
 
         // 3.5. 補查歷史訂單既有商品的價格，避免部分退貨時漏算未退商品的金額
@@ -123,9 +137,9 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 3.6. 將API傳入有重複的商品數量加總（依 product_id 加總）
+        // 3.6. 將API傳入有重複的商品數量加總（依 product_id 加總，僅限存在資料表的商品）
         $inputQtyMap = [];
-        foreach ($products as $p) {
+        foreach ($validProducts as $p) {
             $skuId = trim(strval($p['sku_id']));
             $pid = $skuToProductMap[$skuId];
             $qty = intval($p['quantity']);
@@ -163,8 +177,8 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // B. 寫入本次商品異動明細至歷史明細表 (greattree_order_history)
-        foreach ($products as $p) {
+        // B. 寫入本次商品異動明細至歷史明細表 (greattree_order_history，僅限存在的商品)
+        foreach ($validProducts as $p) {
             $skuId = trim(strval($p['sku_id']));
             $pid = $skuToProductMap[$skuId];
             $qtyInput = intval($p['quantity']);
@@ -209,18 +223,25 @@ class StampPointMapping extends ApiTemplate
         // 7. 重新計算每項印花活動最新應得總點數
         $now = date('Y-m-d H:i:s');
 
-        // 收集所有需要比對的活動 ID：包含目前的活動 + 先前此訂單拿過點數的活動
-        // 第六點是因為，可能退貨時活動已過期，使用第七點會取不到所以才要使用第六點
-        $activeEventIds = [];
-        $activeEventRs = $Conn->execute("SELECT id FROM stamp WHERE is_active = 1 AND start_time <= ? AND end_time >= ?", [$now, $now]);
-        if ($activeEventRs) {
-            while (!$activeEventRs->EOF) {
-                $activeEventIds[] = intval($activeEventRs->fetchObj()->id);
-                $activeEventRs->MoveNext();
-            }
-        }
+        // 收集所有需要比對的活動 ID：
+        // 若為 DEDUCT，只針對先前 ADD 給過的活動進行判斷，其他活動不看
+        // 若為 ADD，則比對目前有效活動 + 先前活動
         $alreadyAwardedEventIds = array_keys($alreadyAwardedPointsMap);
-        $allEventIds = array_unique(array_merge($activeEventIds, $alreadyAwardedEventIds));
+
+        if ($transactionType === 'DEDUCT') {
+            $allEventIds = $alreadyAwardedEventIds;
+            $activeEventIds = []; // DEDUCT 不看當前其他活動
+        } else {
+            $activeEventIds = [];
+            $activeEventRs = $Conn->execute("SELECT id FROM stamp WHERE is_active = 1 AND start_time <= ? AND end_time >= ?", [$now, $now]);
+            if ($activeEventRs) {
+                while (!$activeEventRs->EOF) {
+                    $activeEventIds[] = intval($activeEventRs->fetchObj()->id);
+                    $activeEventRs->MoveNext();
+                }
+            }
+            $allEventIds = array_unique(array_merge($activeEventIds, $alreadyAwardedEventIds));
+        }
 
         $newPointsMap = [];
         if (!empty($allEventIds)) {
