@@ -50,11 +50,11 @@ class StampPointMapping extends ApiTemplate
                 throw new Exception("訂單所屬帳號與傳入帳號不一致", 17);
             }
             if ($transactionType === 'ADD') {
-                throw new Exception("訂單編號已存在，不可重複執行新增", 20);
+                throw new Exception("訂單編號已存在，不可重複執行新增", 21);
             }
         } else {
             if ($transactionType === 'DEDUCT') {
-                throw new Exception("訂單不存在，無法執行退貨", 21);
+                throw new Exception("訂單不存在，無法執行退貨", 22);
             }
         }
 
@@ -104,17 +104,32 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 3.4. 忽略不存在的商品，若整筆訂單所有商品都不存在則拋錯 (代碼 19)
+        // 3.4. 忽略不存在的商品：
+        // 若為 ADD：只保留存在於 product 資料表的商品，若整筆都不存在則拋錯 (代碼 19)
+        // 若為 DEDUCT：只保留原訂單中存在且數量大於 0 的商品，其他商品（無論資料表是否存在）皆直接忽略；
+        //              若整筆退貨商品皆不屬於原訂單，則拋錯 (代碼 20)
         $validProducts = [];
         foreach ($products as $p) {
             $skuId = trim(strval($p['sku_id']));
             if (isset($skuToProductMap[$skuId])) {
-                $validProducts[] = $p;
+                $pid = $skuToProductMap[$skuId];
+                if ($transactionType === 'DEDUCT') {
+                    // 退貨只管原訂單內有的商品；只要原訂單曾購買過，即為有效商品，未購買過者直接忽略
+                    if (isset($currentQtyMap[$pid])) {
+                        $validProducts[] = $p;
+                    }
+                } else {
+                    $validProducts[] = $p;
+                }
             }
         }
 
         if (empty($validProducts)) {
-            throw new Exception("整筆訂單所有商品都不存在", 19);
+            if ($transactionType === 'DEDUCT') {
+                throw new Exception("整筆退貨商品皆不存在於原訂單中", 20);
+            } else {
+                throw new Exception("整筆訂單所有商品都不存在", 19);
+            }
         }
 
         // 3.5. 補查歷史訂單既有商品的價格，避免部分退貨時漏算未退商品的金額
@@ -137,7 +152,7 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 3.6. 將API傳入有重複的商品數量加總（依 product_id 加總，僅限存在資料表的商品）
+        // 3.6. 將API傳入有重複的商品數量加總（依 product_id 加總，僅限本次有效商品）
         $inputQtyMap = [];
         foreach ($validProducts as $p) {
             $skuId = trim(strval($p['sku_id']));
@@ -150,7 +165,7 @@ class StampPointMapping extends ApiTemplate
             $inputQtyMap[$pid] += $qty;
         }
 
-        // 3.7. 將API傳入的數量和資料表比對，若小於0則拋錯
+        // 3.7. 將API傳入的數量和資料表比對，若扣完後小於0則拋錯
         foreach ($inputQtyMap as $pid => $qtyInput) {
             $qtyChange = ($transactionType === 'DEDUCT') ? -$qtyInput : $qtyInput;
 
