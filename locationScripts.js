@@ -1,17 +1,17 @@
 // postman，本地
 // ========== 1. API 基礎設定 ==========
-const url = "http://localhost/greattree/StampPointMapping.php";
+const url = "http://localhost:8111/greattree/StampPointMapping.php";
 const accountId = "7777777"; 
 const dynamicOrderNo = "ORD_" + Date.now(); // 動態產生唯一訂單編號
 
 // 本地測試免驗證 Token
 const authToken = ""; 
 
-// 3 個商品清單
+// 3 個商品清單 (包含單價 prices)
 const myProducts = [
-  { sku_id: "sku_id_1", quantity: 5 },
-  { sku_id: "sku_id_8", quantity: 6 },
-  { sku_id: "sku_id_10", quantity: 3 }
+  { sku_id: "sku_id_1", quantity: 5, prices: 10 },
+  { sku_id: "sku_id_8", quantity: 6, prices: 80 },
+  { sku_id: "sku_id_10", quantity: 3, prices: 100 }
 ];
 
 // ========== 2. 定義測試情境  ==========
@@ -25,7 +25,7 @@ const testCases = [
       transaction_type: "ADD",
       refer: "門市",
       products: [
-        { sku_id: "NOT_EXIST_SKU_9999", quantity: 1 }
+        { sku_id: "NOT_EXIST_SKU_9999", quantity: 1, prices: 100 }
       ]
     },
     expectedReturnCode: "0019"
@@ -38,14 +38,40 @@ const testCases = [
       transaction_type: "ADD",
       refer: "門市",
       products: [
-        { sku_id: "sku_id_1", quantity: 3 },
-        { sku_id: "NOT_EXIST_SKU_9999", quantity: 10 } // 應被忽略
+        { sku_id: "sku_id_1", quantity: 3, prices: 10 },
+        { sku_id: "NOT_EXIST_SKU_9999", quantity: 10, prices: 100 } // 應被忽略
       ]
     },
     expectedReturnCode: "0006",
     expectedEvents: [
       { event_id: 11, point: 5 }
     ]
+  },
+  {
+    name: "情境 1-2: 缺少商品單價 prices 防呆 (預期 return_code: 0023)",
+    payload: {
+      account_id: accountId,
+      order_no: "ORD_NO_PRICE_" + Date.now(),
+      transaction_type: "ADD",
+      refer: "門市",
+      products: [
+        { sku_id: "sku_id_1", quantity: 1 } // 未提供 prices
+      ]
+    },
+    expectedReturnCode: "0023"
+  },
+  {
+    name: "情境 1-3: 商品數量為小數防呆 (預期 return_code: 0004)",
+    payload: {
+      account_id: accountId,
+      order_no: "ORD_DECIMAL_QTY_" + Date.now(),
+      transaction_type: "ADD",
+      refer: "門市",
+      products: [
+        { sku_id: "sku_id_1", quantity: 2.5, prices: 100 }
+      ]
+    },
+    expectedReturnCode: "0004"
   },
 
   // ----- 2. 訂單不存在時的退貨防呆 (DEDUCT) -----
@@ -102,8 +128,8 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "NOT_EXIST_SKU_8888", quantity: 1 }, // 不在資料表
-        { sku_id: "sku_id_2", quantity: 2 }            // 在資料表但不在原訂單
+        { sku_id: "NOT_EXIST_SKU_8888", quantity: 1, prices: 100 }, // 不在資料表
+        { sku_id: "sku_id_2", quantity: 2, prices: 20 }             // 在資料表但不在原訂單
       ]
     },
     expectedReturnCode: "0020"
@@ -116,8 +142,8 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "sku_id_1", quantity: 2 },            // 存在商品：原 5 件退 2 件，剩 3 件
-        { sku_id: "NOT_EXIST_SKU_9999", quantity: 10 }  // 不存在商品：應被自動忽略
+        { sku_id: "sku_id_1", quantity: 2, prices: 10 },            // 存在商品：原 5 件退 2 件，剩 3 件
+        { sku_id: "NOT_EXIST_SKU_9999", quantity: 10, prices: 100 } // 不存在商品：應被自動忽略
       ]
     },
     expectedReturnCode: "0006",
@@ -136,7 +162,7 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "sku_id_8", quantity: 6 } // 退掉 sku_id_8 全部 6 件 (目前剩餘 sku_id_1: 3件, sku_id_10: 3件)
+        { sku_id: "sku_id_8", quantity: 6, prices: 80 } // 退掉 sku_id_8 全部 6 件 (目前剩餘 sku_id_1: 3件, sku_id_10: 3件)
       ]
     },
     expectedReturnCode: "0006",
@@ -154,14 +180,14 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "sku_id_1", quantity: 1 }, // 原訂單有（原剩 3 件，退 1 件，剩 2 件）
-        { sku_id: "sku_id_2", quantity: 5 }  // 資料表有但原訂單沒買過，應被自動忽略！
+        { sku_id: "sku_id_1", quantity: 1, prices: 10 }, // 原訂單有（原剩 3 件，退 1 件，剩 2 件）
+        { sku_id: "sku_id_2", quantity: 5, prices: 20 }  // 資料表有但原訂單沒買過，應被自動忽略！
       ]
     },
     expectedReturnCode: "0006",
     expectedEvents: [
       { event_id: 3,  point: 30 },
-      { event_id: 11, point: 5 },
+      // 活動 11 (美妝區任選三件贈點)：sku_id_1 剩餘 2 件，未達 3 件門檻，故點數歸 0 (不列在 event_list)
       { event_id: 19, point: 21 }
     ]
   },
@@ -173,21 +199,21 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "sku_id_1", quantity: 10 } // 原剩 2 件，退 10 件超過現有數量
+        { sku_id: "sku_id_1", quantity: 10, prices: 10 } // 原剩 2 件，退 10 件超過現有數量
       ]
     },
     expectedReturnCode: "0011"
   },
   {
-    name: "情境 5-5: DEDUCT 傳入重複同一商品，合併加總後超過剩餘數量 (預期 return_code: 0011)",
+    name: "情境 5-5: DEDUCT 傳入重複同一商品且同單價，合併加總後超過剩餘數量 (預期 return_code: 0011)",
     payload: {
       account_id: accountId,
       order_no: dynamicOrderNo,
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "sku_id_1", quantity: 2 }, // 原剩 2 件
-        { sku_id: "sku_id_1", quantity: 1 }  // 重複傳入同一商品，合併加總為 3 件，超過剩餘數量 2 件
+        { sku_id: "sku_id_1", quantity: 2, prices: 10 }, // 原剩 2 件
+        { sku_id: "sku_id_1", quantity: 1, prices: 10 }  // 重複傳入同一商品且同單價，合併加總為 3 件，超過剩餘數量 2 件
       ]
     },
     expectedReturnCode: "0011"
@@ -215,8 +241,8 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "sku_id_1", quantity: 2 },  // 原剩 2 件，退光
-        { sku_id: "sku_id_10", quantity: 3 }  // 原剩 3 件，退光
+        { sku_id: "sku_id_1", quantity: 2, prices: 10 },  // 原剩 2 件，退光
+        { sku_id: "sku_id_10", quantity: 3, prices: 100 } // 原剩 3 件，退光
       ]
     },
     expectedReturnCode: "0006",
@@ -230,10 +256,53 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "sku_id_1", quantity: 1 }
+        { sku_id: "sku_id_1", quantity: 1, prices: 10 }
       ]
     },
     expectedReturnCode: "0011"
+  },
+
+  // ----- 8. 今日新增邏輯專項測試 (同商品不同單價、同商品同單價合併、扣點不為負) -----
+  {
+    name: "情境 8: ADD 傳入同商品同單價(合併為1筆) + 同商品不同單價(各寫1筆) (預期成功 0006)",
+    payload: {
+      account_id: accountId,
+      order_no: "ORD_MULTI_PRICE_" + Date.now(),
+      transaction_type: "ADD",
+      refer: "門市",
+      products: [
+        { sku_id: "sku_id_1", quantity: 2, prices: 100 },
+        { sku_id: "sku_id_1", quantity: 3, prices: 100 }, // 同商品同單價 -> 合併為 5 件 (500元)
+        { sku_id: "sku_id_1", quantity: 1, prices: 120 }  // 同商品不同單價 -> 獨立寫入 1 件 (120元)
+      ]
+    },
+    expectedReturnCode: "0006"
+  },
+  {
+    name: "情境 8-1: DEDUCT 退貨帶入不同單價，且差額大於原有點數時最多扣到歸零，不可為負 (預期成功 0006)",
+    payload: {
+      account_id: accountId,
+      order_no: "ORD_ZERO_POINT_" + Date.now(),
+      transaction_type: "ADD",
+      refer: "門市",
+      products: [
+        { sku_id: "sku_id_1", quantity: 3, prices: 100 } // 300元
+      ]
+    },
+    expectedReturnCode: "0006"
+  },
+  {
+    name: "情境 8-2: 內層陣列格式異常傳入非物件防呆 (預期 return_code: 0024)",
+    payload: {
+      account_id: accountId,
+      order_no: "ORD_BAD_INNER_" + Date.now(),
+      transaction_type: "ADD",
+      refer: "門市",
+      products: [
+        "this_is_not_an_object" // 內層商品明細非物件
+      ]
+    },
+    expectedReturnCode: "0024"
   }
 ];
 
@@ -300,7 +369,7 @@ function sendPostmanRequest(targetUrl, payload) {
         pm.expect.fail(`請求異常: ${err.message}`);
       });
     } finally {
-      // 主管要求的樹狀 SKIPPED 格式
+      // 樹狀 SKIPPED 呈現
       const rqStr = JSON.stringify(tc.payload);
       const rsStr = JSON.stringify(data);
 
