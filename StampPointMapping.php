@@ -3,6 +3,14 @@ require_once 'autoload.php';
 
 class StampPointMapping extends ApiTemplate
 {
+    /**
+     * 檢查數值是否為純整數
+     */
+    private function isIntegerValue($value): bool
+    {
+        return is_int($value) || (is_string($value) && preg_match('/^-?\d+$/', trim($value)) === 1);
+    }
+
     protected function execute()
     {
         date_default_timezone_set('Asia/Taipei');
@@ -30,7 +38,7 @@ class StampPointMapping extends ApiTemplate
         }
 
         if (empty($products) || !is_array($products)) {
-            throw new Exception('商品格式異常', 7);
+            throw new Exception('商品清單格式異常或未提供', 7);
         }
 
         if ($refer != "門市" && $refer != "線上") {
@@ -69,36 +77,41 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 3.2. 驗證傳入商品的 sku_id 與 quantity 格式
+        // 3.2. 驗證傳入商品的 sku_id、quantity 與 prices 格式（嚴格檢查純整數，避免小數被靜默截斷）
         $inputSkuIds = [];
         foreach ($products as $p) {
-            $skuId = isset($p['sku_id']) ? trim(strval($p['sku_id'])) : '';
-            $qty = isset($p['quantity']) ? intval($p['quantity']) : 0;
+            if (!is_array($p)) {
+                throw new Exception("商品明細格式異常", 24);
+            }
 
+            $skuId = isset($p['sku_id']) ? trim(strval($p['sku_id'])) : '';
             if ($skuId === '') {
                 throw new Exception("sku_id格式異常或未提供", 3);
             }
-            if ($qty <= 0) {
+
+            if (!isset($p['quantity']) || !$this->isIntegerValue($p['quantity']) || intval($p['quantity']) <= 0) {
                 throw new Exception("商品數量格式異常或未提供", 4);
+            }
+
+            if (!isset($p['prices']) || !$this->isIntegerValue($p['prices']) || intval($p['prices']) < 0) {
+                throw new Exception("商品單價格式異常或未提供", 23);
             }
 
             $inputSkuIds[] = $skuId;
         }
         $inputSkuIds = array_unique($inputSkuIds);
 
-        // 3.3. 透過 sku_id 查詢 product 資料表
+        // 3.3. 透過 sku_id 查詢 product 資料表取得 product_id
         $skuToProductMap = [];
-        $priceMap = [];
 
         if (!empty($inputSkuIds)) {
             $skuPlaceholders = implode(',', array_fill(0, count($inputSkuIds), '?'));
-            $productRs = $Conn->execute("SELECT product_id, sku_id, prices FROM product WHERE sku_id IN ($skuPlaceholders)", $inputSkuIds);
+            $productRs = $Conn->execute("SELECT product_id, sku_id FROM product WHERE sku_id IN ($skuPlaceholders)", $inputSkuIds);
             if ($productRs) {
                 while (!$productRs->EOF) {
                     $pObj = $productRs->fetchObj();
                     $pid = intval($pObj->product_id);
                     $skuToProductMap[strval($pObj->sku_id)] = $pid;
-                    $priceMap[$pid] = intval($pObj->prices);
                     $productRs->MoveNext();
                 }
             }
@@ -132,40 +145,40 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 3.5. 補查歷史訂單既有商品的價格，避免部分退貨時漏算未退商品的金額
-        $existingProductIds = array_keys($currentQtyMap);
-        $missingPriceProductIds = [];
-        foreach ($existingProductIds as $extPid) {
-            if (!isset($priceMap[$extPid])) {
-                $missingPriceProductIds[] = $extPid;
-            }
-        }
-        if (!empty($missingPriceProductIds)) {
-            $extPlaceholders = implode(',', array_fill(0, count($missingPriceProductIds), '?'));
-            $extPriceRs = $Conn->execute("SELECT product_id, prices FROM product WHERE product_id IN ($extPlaceholders)", $missingPriceProductIds);
-            if ($extPriceRs) {
-                while (!$extPriceRs->EOF) {
-                    $pObj = $extPriceRs->fetchObj();
-                    $priceMap[intval($pObj->product_id)] = intval($pObj->prices);
-                    $extPriceRs->MoveNext();
-                }
-            }
-        }
+        // 3.5. 收集傳入商品明細，依 (sku_id + prices) 聚合合併
+        // 若 sku_id 和 prices 都相同則合併數量；若 sku_id 相同但 prices 不同則視為不同明細項目
+        $mergedProducts = [];
+        $inputQtyMap = []; // 依 product_id 累計總數量，用於校驗總扣減數量
+        $totalAddAmount = 0; // 本次 ADD 商品總金額
 
-        // 3.6. 將API傳入有重複的商品數量加總（依 product_id 加總，僅限本次有效商品）
-        $inputQtyMap = [];
         foreach ($validProducts as $p) {
             $skuId = trim(strval($p['sku_id']));
             $pid = $skuToProductMap[$skuId];
             $qty = intval($p['quantity']);
+            $price = intval($p['prices']);
+
+            $key = $skuId . '_' . $price;
+            if (!isset($mergedProducts[$key])) {
+                $mergedProducts[$key] = [
+                    'sku_id' => $skuId,
+                    'product_id' => $pid,
+                    'price' => $price,
+                    'quantity' => 0
+                ];
+            }
+            $mergedProducts[$key]['quantity'] += $qty;
 
             if (!isset($inputQtyMap[$pid])) {
                 $inputQtyMap[$pid] = 0;
             }
             $inputQtyMap[$pid] += $qty;
+
+            if ($transactionType === 'ADD') {
+                $totalAddAmount += ($qty * $price);
+            }
         }
 
-        // 3.7. 將API傳入的數量和資料表比對，若扣完後小於0則拋錯
+        // 3.6. 將API傳入的數量和資料表比對，若扣完後小於0則拋錯
         foreach ($inputQtyMap as $pid => $qtyInput) {
             $qtyChange = ($transactionType === 'DEDUCT') ? -$qtyInput : $qtyInput;
 
@@ -178,31 +191,32 @@ class StampPointMapping extends ApiTemplate
         }
 
         // 4. 寫入本次交易紀錄
-        // A. 寫入/更新大樹訂單主檔 (greattree_orders) - 只有在主檔不存在時才 INSERT 一次主檔
+        // A. 寫入/更新大樹訂單主檔 (greattree_orders) - 只有在主檔不存在時才 INSERT 一次主檔 (order_amount 僅在 ADD 時寫入)
         $checkOrder = $Conn->execute("SELECT 1 FROM greattree_orders WHERE order_id = ? AND account_id = ? LIMIT 1", [$orderId, $accountId]);
         if (!$checkOrder || $checkOrder->RecordCount() == 0) {
             $insertOrderHeader = $Conn->autoExecute('greattree_orders', [
                 'order_id' => $orderId,
                 'account_id' => $accountId,
                 'order_date' => date('Y-m-d'),
-                'order_time' => date('H:i:s')
+                'order_time' => date('H:i:s'),
+                'order_amount' => $totalAddAmount
             ], 'INSERT');
             if (!$insertOrderHeader) {
                 throw new Exception('寫入訂單主檔失敗', 13);
             }
         }
 
-        // B. 寫入本次商品異動明細至歷史明細表 (greattree_order_history，僅限存在的商品)
-        foreach ($validProducts as $p) {
-            $skuId = trim(strval($p['sku_id']));
-            $pid = $skuToProductMap[$skuId];
-            $qtyInput = intval($p['quantity']);
-            $qty = ($transactionType === 'DEDUCT') ? -$qtyInput : $qtyInput;
+        // B. 寫入本次商品異動明細至歷史明細表 (greattree_order_history，依 sku_id + price 合併後寫入，同商品且同單價合併為一筆)
+        foreach ($mergedProducts as $item) {
+            $pid = $item['product_id'];
+            $price = $item['price'];
+            $qty = ($transactionType === 'DEDUCT') ? -$item['quantity'] : $item['quantity'];
 
             $insertOrderHistory = $Conn->autoExecute('greattree_order_history', [
                 'order_id' => $orderId,
                 'product_id' => $pid,
-                'quantity' => $qty
+                'quantity' => $qty,
+                'price' => $price
             ], 'INSERT');
 
             if (!$insertOrderHistory) {
@@ -210,22 +224,23 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 5. 取得該訂單調整後的所有商品歷史最新總量
+        // 5. 取得該訂單調整後的所有商品歷史明細，統計各商品最新總數量與金額
         $totalProducts = [];
-        $totalOrderRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty FROM greattree_order_history WHERE order_id = ? GROUP BY product_id", [$orderId]);
-        if ($totalOrderRs) {
-            while (!$totalOrderRs->EOF) {
-                $row = $totalOrderRs->fetchObj();
+        $totalOrderHistoryRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty, SUM(quantity * price) as total_amount FROM greattree_order_history WHERE order_id = ? GROUP BY product_id", [$orderId]);
+        if ($totalOrderHistoryRs) {
+            while (!$totalOrderHistoryRs->EOF) {
+                $row = $totalOrderHistoryRs->fetchObj();
                 $totalProducts[] = [
                     'product_id' => intval($row->product_id),
-                    'quantity' => intval($row->total_qty)
+                    'quantity' => intval($row->total_qty),
+                    'amount' => intval($row->total_amount)
                 ];
-                $totalOrderRs->MoveNext();
+                $totalOrderHistoryRs->MoveNext();
             }
         }
         // 6. 查詢該訂單先前已發放的總點數
         $alreadyAwardedPointsMap = [];
-        $historySql = "SELECT refer_stamp_id as event_id, SUM(point) as total_point FROM point_history WHERE refer_order_id = ? AND account_id = ? GROUP BY refer_stamp_id";
+        $historySql = "SELECT refer_stamp_id as event_id, SUM(point) as total_point FROM point_history WHERE refer_order_id = ? AND account_id = ? AND point_type = 3 GROUP BY refer_stamp_id";
         $historyRs = $Conn->execute($historySql, [$orderId, $accountId]);
         if ($historyRs) {
             while (!$historyRs->EOF) {
@@ -284,7 +299,7 @@ class StampPointMapping extends ApiTemplate
                     foreach ($totalProducts as $p) {
                         $pid = $p['product_id'];
                         $qty = $p['quantity'];
-                        // 不太會進到這裡，因為3.5已經將小於0的拋出錯誤
+                        $itemAmount = $p['amount'];
                         if ($qty < 0) {
                             $qty = 0; // 若總數量累計為負數，歸零計算
                         }
@@ -299,13 +314,17 @@ class StampPointMapping extends ApiTemplate
                         }
 
                         if ($isQualified) {
-                            $price = isset($priceMap[$pid]) ? $priceMap[$pid] : 0;
-                            $qualifiedAmount += ($price * $qty);
+                            $qualifiedAmount += $itemAmount;
                             $qualifiedQuantity += $qty;
                         }
                     }
 
-                    // 取得規則，並依門檻金額由高到低排序，以利找出符合的最高門檻
+                    // 避免扣退貨金額大於原始金額導致 $qualifiedAmount 為負數
+                    if ($qualifiedAmount < 0) {
+                        $qualifiedAmount = 0;
+                    }
+
+                    // 取得規則，並依門檻金額排序
                     $ruleSql = "SELECT threshold_type, threshold_amount, reward_points FROM stamp_rule WHERE event_id = ? ORDER BY threshold_amount DESC";
                     $ruleRs = $Conn->execute($ruleSql, [$event->id]);
 
@@ -313,18 +332,16 @@ class StampPointMapping extends ApiTemplate
                     if ($ruleRs && $ruleRs->RecordCount() > 0) {
                         while (!$ruleRs->EOF) {
                             $rule = $ruleRs->fetchObj();
-                            // 依照模式判斷是否達標：1.滿額(AMOUNT) 2.滿件(QUANTITY)
+                            // 依照模式判斷是否達標：1.滿額(AMOUNT) 累進累加各階梯倍數 2.滿件(QUANTITY) 取最高符合門檻
                             if ($rule->threshold_type == 'AMOUNT') {
                                 if ($rule->threshold_amount > 0 && $qualifiedAmount >= $rule->threshold_amount) {
                                     $multiplier = floor($qualifiedAmount / $rule->threshold_amount);
-                                    $rewardPoints = $multiplier * $rule->reward_points;
-                                    break;
+                                    $rewardPoints += ($multiplier * $rule->reward_points);
                                 }
                             } else if ($rule->threshold_type == 'QUANTITY') {
                                 if ($rule->threshold_amount > 0 && $qualifiedQuantity >= $rule->threshold_amount) {
                                     $multiplier = floor($qualifiedQuantity / $rule->threshold_amount);
-                                    $rewardPoints = $multiplier * $rule->reward_points;
-                                    break;
+                                    $rewardPoints += $multiplier * $rule->reward_points;
                                 }
                             }
                             $ruleRs->MoveNext();
@@ -356,6 +373,15 @@ class StampPointMapping extends ApiTemplate
                 $diffPoint = 0;
             }
 
+            // 扣到沒點數為止：若本次為扣點，最多扣回已發點數 ($alreadyAwarded)，確保該活動累計 SUM(point) 不為負數
+            if ($diffPoint < 0) {
+                if ($alreadyAwarded <= 0) {
+                    $diffPoint = 0;
+                } else if (abs($diffPoint) > $alreadyAwarded) {
+                    $diffPoint = -$alreadyAwarded;
+                }
+            }
+
             if ($diffPoint != 0) {
                 $insertHistory = $Conn->autoExecute('point_history', [
                     'account_id' => $accountId,
@@ -381,18 +407,21 @@ class StampPointMapping extends ApiTemplate
                     continue;
                 }
 
-                $diffPoint = -$alreadyAwarded;
-                $insertHistory = $Conn->autoExecute('point_history', [
-                    'account_id' => $accountId,
-                    'point_type' => 3, // STAMP
-                    'point' => $diffPoint,
-                    'note' => ($transactionType === 'DEDUCT') ? '退貨' : "",
-                    'refer' => $refer,
-                    'refer_order_id' => $orderId,
-                    'refer_stamp_id' => $eventId
-                ], 'INSERT');
-                if (!$insertHistory) {
-                    throw new Exception('過期活動點數寫入點數歷史失敗', 15);
+                // 扣到沒點數為止：最多只扣回正數已發點數
+                $diffPoint = ($alreadyAwarded > 0) ? -$alreadyAwarded : 0;
+                if ($diffPoint != 0) {
+                    $insertHistory = $Conn->autoExecute('point_history', [
+                        'account_id' => $accountId,
+                        'point_type' => 3, // STAMP
+                        'point' => $diffPoint,
+                        'note' => ($transactionType === 'DEDUCT') ? '退貨' : "",
+                        'refer' => $refer,
+                        'refer_order_id' => $orderId,
+                        'refer_stamp_id' => $eventId
+                    ], 'INSERT');
+                    if (!$insertHistory) {
+                        throw new Exception('過期活動點數寫入點數歷史失敗', 15);
+                    }
                 }
             }
         }
