@@ -5,6 +5,8 @@ class StampPointMapping extends ApiTemplate
 {
     /**
      * 檢查數值是否為純整數
+     * @param mixed $value
+     * @return bool
      */
     private function isIntegerValue($value): bool
     {
@@ -77,7 +79,7 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 3.2. 驗證傳入商品的 sku_id、quantity 與 prices 格式（嚴格檢查純整數，避免小數被靜默截斷）
+        // 3.2. 驗證傳入商品的 sku_id、quantity 與 price 格式（嚴格檢查純整數，避免小數被靜默截斷）
         $inputSkuIds = [];
         foreach ($products as $p) {
             if (!is_array($p)) {
@@ -93,7 +95,7 @@ class StampPointMapping extends ApiTemplate
                 throw new Exception("商品數量格式異常或未提供", 4);
             }
 
-            if (!isset($p['prices']) || !$this->isIntegerValue($p['prices']) || intval($p['prices']) < 0) {
+            if (!isset($p['price']) || !$this->isIntegerValue($p['price']) || intval($p['price']) < 0) {
                 throw new Exception("商品單價格式異常或未提供", 23);
             }
 
@@ -145,8 +147,8 @@ class StampPointMapping extends ApiTemplate
             }
         }
 
-        // 3.5. 收集傳入商品明細，依 (sku_id + prices) 聚合合併
-        // 若 sku_id 和 prices 都相同則合併數量；若 sku_id 相同但 prices 不同則視為不同明細項目
+        // 3.5. 收集傳入商品明細，依 (sku_id + price) 聚合合併
+        // 若 sku_id 和 price 都相同則合併數量；若 sku_id 相同但 price 不同則視為不同明細項目
         $mergedProducts = [];
         $inputQtyMap = []; // 依 product_id 累計總數量，用於校驗總扣減數量
         $totalAddAmount = 0; // 本次 ADD 商品總金額
@@ -155,7 +157,7 @@ class StampPointMapping extends ApiTemplate
             $skuId = trim(strval($p['sku_id']));
             $pid = $skuToProductMap[$skuId];
             $qty = intval($p['quantity']);
-            $price = intval($p['prices']);
+            $price = intval($p['price']);
 
             $key = $skuId . '_' . $price;
             if (!isset($mergedProducts[$key])) {

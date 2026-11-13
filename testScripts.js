@@ -16,11 +16,11 @@ const dynamicOrderNo = "ORD_" + Date.now();                // 情境 3~7 共用�
 const multiPriceOrderNo = "ORD_MULTI_PRICE_" + Date.now(); // 情境 8 系列共用單號
 const zeroCapOrderNo = "ORD_ZERO_CAP_" + Date.now();       // 情境 9 系列共用單號
 
-// 3 個商品清單 (prices 必填，以原 product 表單價帶入)
+// 3 個商品清單 (price 必填，以原 product 表單價帶入)
 const myProducts = [
-  { sku_id: "SKUA0128", quantity: 3, prices: 100 }, // 100元 X3 = 300元  (product_id: 28)
-  { sku_id: "717171",   quantity: 6, prices: 300 }, // 300元 X6 = 1800元 (product_id: 44)
-  { sku_id: "000002",   quantity: 3, prices: 200 }  // 200元 X3 = 600元  (product_id: 56)
+  { sku_id: "SKUA0128", quantity: 3, price: 100 }, // 100元 X3 = 300元  (product_id: 28)
+  { sku_id: "717171",   quantity: 6, price: 300 }, // 300元 X6 = 1800元 (product_id: 44)
+  { sku_id: "000002",   quantity: 3, price: 200 }  // 200元 X3 = 600元  (product_id: 56)
 ];
 
 // 測試站目前有效活動：
@@ -38,7 +38,7 @@ const testCases = [
       transaction_type: "ADD",
       refer: "門市",
       products: [
-        { sku_id: "NOT_EXIST_SKU_9999", quantity: 1, prices: 100 }
+        { sku_id: "NOT_EXIST_SKU_9999", quantity: 1, price: 100 }
       ]
     },
     expectedReturnCode: "0019"
@@ -51,8 +51,8 @@ const testCases = [
       transaction_type: "ADD",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 3, prices: 100 },           // 3 件 / 300 元
-        { sku_id: "NOT_EXIST_SKU_9999", quantity: 10, prices: 100 } // 應被忽略
+        { sku_id: "SKUA0128", quantity: 3, price: 100 },           // 3 件 / 300 元
+        { sku_id: "NOT_EXIST_SKU_9999", quantity: 10, price: 100 } // 應被忽略
       ]
     },
     expectedReturnCode: "0006",
@@ -62,14 +62,14 @@ const testCases = [
     ]
   },
   {
-    name: "情境 1-2: 缺少商品單價 prices 防呆 (預期 return_code: 0023)",
+    name: "情境 1-2: 缺少商品單價 price 防呆 (預期 return_code: 0023)",
     payload: {
       account_id: accountId,
       order_no: "ORD_NO_PRICE_" + Date.now(),
       transaction_type: "ADD",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 1 } // 未提供 prices
+        { sku_id: "SKUA0128", quantity: 1 } // 未提供 price
       ]
     },
     expectedReturnCode: "0023"
@@ -82,7 +82,7 @@ const testCases = [
       transaction_type: "ADD",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 2.5, prices: 100 }
+        { sku_id: "SKUA0128", quantity: 2.5, price: 100 }
       ]
     },
     expectedReturnCode: "0004"
@@ -140,8 +140,8 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "NOT_EXIST_SKU_8888", quantity: 1, prices: 100 }, // 不在資料表
-        { sku_id: "000001", quantity: 2, prices: 100 }              // 在資料表但不在原訂單
+        { sku_id: "NOT_EXIST_SKU_8888", quantity: 1, price: 100 }, // 不在資料表
+        { sku_id: "000001", quantity: 2, price: 100 }              // 在資料表但不在原訂單
       ]
     },
     expectedReturnCode: "0020"
@@ -154,8 +154,8 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 1, prices: 100 },           // 原 3 件退 1 件，剩 2 件
-        { sku_id: "NOT_EXIST_SKU_9999", quantity: 10, prices: 100 } // 不存在商品：應被自動忽略
+        { sku_id: "SKUA0128", quantity: 1, price: 100 },           // 原 3 件退 1 件，剩 2 件
+        { sku_id: "NOT_EXIST_SKU_9999", quantity: 10, price: 100 } // 不存在商品：應被自動忽略
       ]
     },
     // 剩 11 件 / 2600 元
@@ -173,7 +173,7 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "717171", quantity: 6, prices: 300 } // 退掉 717171 全部 6 件 (1800元)
+        { sku_id: "717171", quantity: 6, price: 300 } // 退掉 717171 全部 6 件 (1800元)
       ]
     },
     // 剩 SKUA0128: 2件(200元) + 000002: 3件(600元) = 5 件 / 800 元
@@ -191,8 +191,8 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 1, prices: 100 }, // 原剩 2 件，退 1 件，剩 1 件
-        { sku_id: "000001", quantity: 5, prices: 100 }    // 原訂單沒買過，應被自動忽略
+        { sku_id: "SKUA0128", quantity: 1, price: 100 }, // 原剩 2 件，退 1 件，剩 1 件
+        { sku_id: "000001", quantity: 5, price: 100 }    // 原訂單沒買過，應被自動忽略
       ]
     },
     // 剩 SKUA0128: 1件(100元) + 000002: 3件(600元) = 4 件 / 700 元
@@ -210,7 +210,7 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 10, prices: 100 } // 原剩 1 件，退 10 件超過現有數量
+        { sku_id: "SKUA0128", quantity: 10, price: 100 } // 原剩 1 件，退 10 件超過現有數量
       ]
     },
     expectedReturnCode: "0011"
@@ -223,8 +223,8 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 1, prices: 100 }, // 原剩 1 件
-        { sku_id: "SKUA0128", quantity: 1, prices: 100 }  // 合併為 2 件，超過剩餘 1 件
+        { sku_id: "SKUA0128", quantity: 1, price: 100 }, // 原剩 1 件
+        { sku_id: "SKUA0128", quantity: 1, price: 100 }  // 合併為 2 件，超過剩餘 1 件
       ]
     },
     expectedReturnCode: "0011"
@@ -252,8 +252,8 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 1, prices: 100 }, // 原剩 1 件，退光
-        { sku_id: "000002",   quantity: 3, prices: 200 }  // 原剩 3 件，退光
+        { sku_id: "SKUA0128", quantity: 1, price: 100 }, // 原剩 1 件，退光
+        { sku_id: "000002",   quantity: 3, price: 200 }  // 原剩 3 件，退光
       ]
     },
     expectedReturnCode: "0006",
@@ -267,7 +267,7 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 1, prices: 100 }
+        { sku_id: "SKUA0128", quantity: 1, price: 100 }
       ]
     },
     expectedReturnCode: "0011"
@@ -282,9 +282,9 @@ const testCases = [
       transaction_type: "ADD",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 2, prices: 100 },
-        { sku_id: "SKUA0128", quantity: 3, prices: 100 }, // 同商品同單價 -> 合併為 5 件 (500元)
-        { sku_id: "SKUA0128", quantity: 1, prices: 120 }  // 同商品不同單價 -> 獨立寫入 1 件 (120元)
+        { sku_id: "SKUA0128", quantity: 2, price: 100 },
+        { sku_id: "SKUA0128", quantity: 3, price: 100 }, // 同商品同單價 -> 合併為 5 件 (500元)
+        { sku_id: "SKUA0128", quantity: 1, price: 120 }  // 同商品不同單價 -> 獨立寫入 1 件 (120元)
       ]
     },
     // 合計 6 件 / 620 元
@@ -302,7 +302,7 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 2, prices: 100 }
+        { sku_id: "SKUA0128", quantity: 2, price: 100 }
       ]
     },
     // 剩 3件x100 + 1件x120 = 4 件 / 420 元
@@ -320,8 +320,8 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 3, prices: 100 },
-        { sku_id: "SKUA0128", quantity: 1, prices: 120 }
+        { sku_id: "SKUA0128", quantity: 3, price: 100 },
+        { sku_id: "SKUA0128", quantity: 1, price: 120 }
       ]
     },
     expectedReturnCode: "0006",
@@ -350,7 +350,7 @@ const testCases = [
       transaction_type: "ADD",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 3, prices: 100 } // 合計 3 件 / 300 元
+        { sku_id: "SKUA0128", quantity: 3, price: 100 } // 合計 3 件 / 300 元
       ]
     },
     expectedReturnCode: "0006",
@@ -367,7 +367,7 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 1, prices: 500 } // 剩 2 件，金額為 300 - 500 = -200 元
+        { sku_id: "SKUA0128", quantity: 1, price: 500 } // 剩 2 件，金額為 300 - 500 = -200 元
       ]
     },
     expectedReturnCode: "0006",
@@ -383,7 +383,7 @@ const testCases = [
       transaction_type: "DEDUCT",
       refer: "門市",
       products: [
-        { sku_id: "SKUA0128", quantity: 2, prices: 100 } // 退光剩下 2 件
+        { sku_id: "SKUA0128", quantity: 2, price: 100 } // 退光剩下 2 件
       ]
     },
     expectedReturnCode: "0006",
