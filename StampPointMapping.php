@@ -119,7 +119,7 @@ class StampPointMapping extends ApiTemplate
 
         // 3.4. 忽略不存在的商品：
         // 若為 ADD：只保留存在於 product 資料表的商品，若整筆都不存在則拋錯 (代碼 19)
-        // 若為 DEDUCT：只保留原訂單中存在且數量大於 0 的商品，其他商品（無論資料表是否存在）皆直接忽略；
+        // 若為 DEDUCT：只保留原訂單中曾購買過的商品，其他商品（無論資料表是否存在）皆直接忽略；
         //              若整筆退貨商品皆不屬於原訂單，則拋錯 (代碼 20)
         $validProducts = [];
         foreach ($products as $p) {
@@ -226,17 +226,18 @@ class StampPointMapping extends ApiTemplate
 
         // 5. 取得該訂單調整後的所有商品歷史明細，統計各商品最新總數量與金額
         $totalProducts = [];
-        $totalOrderHistoryRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty, SUM(quantity * price) as total_amount FROM greattree_order_history WHERE order_id = ? GROUP BY product_id", [$orderId]);
-        if ($totalOrderHistoryRs) {
-            while (!$totalOrderHistoryRs->EOF) {
-                $row = $totalOrderHistoryRs->fetchObj();
-                $totalProducts[] = [
-                    'product_id' => intval($row->product_id),
-                    'quantity' => intval($row->total_qty),
-                    'amount' => intval($row->total_amount)
-                ];
-                $totalOrderHistoryRs->MoveNext();
-            }
+        $totalOrderHistoryRs = $Conn->execute("SELECT product_id, SUM(quantity) as total_qty, SUM(CAST(quantity AS SIGNED) * CAST(price AS SIGNED)) as total_amount FROM greattree_order_history WHERE order_id = ? GROUP BY product_id", [$orderId]);
+        if (!$totalOrderHistoryRs) {
+            throw new Exception('查詢訂單明細統計失敗', 25);
+        }
+        while (!$totalOrderHistoryRs->EOF) {
+            $row = $totalOrderHistoryRs->fetchObj();
+            $totalProducts[] = [
+                'product_id' => intval($row->product_id),
+                'quantity' => intval($row->total_qty),
+                'amount' => intval($row->total_amount)
+            ];
+            $totalOrderHistoryRs->MoveNext();
         }
         // 6. 查詢該訂單先前已發放的總點數
         $alreadyAwardedPointsMap = [];
@@ -332,7 +333,7 @@ class StampPointMapping extends ApiTemplate
                     if ($ruleRs && $ruleRs->RecordCount() > 0) {
                         while (!$ruleRs->EOF) {
                             $rule = $ruleRs->fetchObj();
-                            // 依照模式判斷是否達標：1.滿額(AMOUNT) 累進累加各階梯倍數 2.滿件(QUANTITY) 取最高符合門檻
+                            // 依照模式判斷是否達標：滿額(AMOUNT) 與 滿件(QUANTITY) 皆累加各階梯倍數
                             if ($rule->threshold_type == 'AMOUNT') {
                                 if ($rule->threshold_amount > 0 && $qualifiedAmount >= $rule->threshold_amount) {
                                     $multiplier = floor($qualifiedAmount / $rule->threshold_amount);
@@ -341,7 +342,7 @@ class StampPointMapping extends ApiTemplate
                             } else if ($rule->threshold_type == 'QUANTITY') {
                                 if ($rule->threshold_amount > 0 && $qualifiedQuantity >= $rule->threshold_amount) {
                                     $multiplier = floor($qualifiedQuantity / $rule->threshold_amount);
-                                    $rewardPoints += $multiplier * $rule->reward_points;
+                                    $rewardPoints += ($multiplier * $rule->reward_points);
                                 }
                             }
                             $ruleRs->MoveNext();
