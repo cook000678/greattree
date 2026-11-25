@@ -8,7 +8,7 @@ class StampPointMapping extends ApiTemplate
      * @param mixed $value
      * @return bool
      */
-    private function isIntegerValue($value): bool
+    private function isIntegerValue($value)
     {
         return is_int($value) || (is_string($value) && preg_match('/^-?\d+$/', trim($value)) === 1);
     }
