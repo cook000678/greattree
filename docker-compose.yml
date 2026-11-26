@@ -4,7 +4,7 @@ services:
     build: .
     container_name: gt_php72_server
     ports:
-      - "80:80" # http://localhost
+      - "8111:80" # http://localhost
     volumes:
       - .:/var/www/html/greattree
       - ../Tools:/var/www/html/Tools
